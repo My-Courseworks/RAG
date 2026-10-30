@@ -1,0 +1,223 @@
+1
+00:00:00,600 --> 00:00:21,680
+This is module two of a course on retrieval-augmented generation. The module asks one question: what are the stages of a RAG pipeline, and what does each one cost when it is wrong? We will follow one question from a logistics company, LogiTrack, through all ten stages, and watch where it dies.
+
+2
+00:00:22,430 --> 00:00:48,230
+Picture the system from module one, up and running. LogiTrack has frozen a test set of sixty queries and indexed a pilot corpus. Now the operations team starts asking the question the whole project exists for, in the exact words a customs broker would use. What is the dangerous-goods surcharge for lithium batteries on the Rotterdam to Singapore lane?
+
+3
+00:00:48,980 --> 00:01:09,940
+The system answers confidently, with a citation. It points to the rate table for the Rotterdam to Singapore lane, forty-foot container, and quotes the surcharge column: zero euros. It is the correct cell. It is the correct table. And it is the wrong answer.
+
+4
+00:01:10,690 --> 00:01:37,770
+The lithium battery surcharge lives in a different column of that same table. That column is keyed on the shipment's UN number, not on the commodity name. The query said lithium batteries. The corpus says UN thirty-four eighty, UN thirty-four eighty-one, and in two places, lithium-ion cells, class nine. Not one document uses the phrase lithium batteries in a rate context.
+
+5
+00:01:38,520 --> 00:02:00,480
+So the query's embedding landed in the right neighbourhood: the right lane, the right container size, the right surcharge column. The retriever returned a row that was genuinely about that lane, genuinely about a surcharge, and genuinely zero. Every stage did its job. The pipeline was correct at nine of ten hops, and the answer was still wrong.
+
+6
+00:02:01,230 --> 00:02:27,390
+Now imagine the engineer asked to debug this. There are four plausible suspects: the retriever, the embedding model, the chunker, and the prompt. Each suspect implies a different, expensive fix. Swap the embedding model, re-chunk the corpus, rewrite the prompt, or add a reranker. Guess correctly and it costs a week. Guess wrong and it costs a quarter.
+
+7
+00:02:28,140 --> 00:02:54,980
+The way out is not a better component. It is a named hop for every transformation between the question and the answer, each with a defined input, a defined output, and a defined way to be wrong. Once the hops have names, the vague complaint that retrieval is bad becomes one of eight specific claims, each with its own owner, its own fix, and its own price.
+
+8
+00:02:55,730 --> 00:03:17,010
+That is the failure this module is about, in one line. Running an unnamed pipeline, a chain of library calls with no contract and no instrumentation per stage. A wrong answer becomes unattributable, every fix becomes a guess, and the cheapest correct fix is never the one that gets tried.
+
+9
+00:03:17,760 --> 00:03:43,680
+So let us name the stages. The LlamaIndex framework documents five: loading, indexing, storing, querying, and evaluation. This course uses ten, because the decomposition has to be debuggable, and querying alone is where six of the eight failure modes live. Ten stages, split into two paths: an ingest path and a query path.
+
+10
+00:03:44,430 --> 00:04:09,230
+The ingest path comes first. Stage one, load: files, APIs and mailboxes become document objects, raw text with source metadata. Its cost is bytes moved and parser time. Stage two, parse: raw text becomes structured text, with headings, clauses, tables, and reading order intact. Its cost is parser quality and compute.
+
+11
+00:04:09,980 --> 00:04:41,660
+Stage three, chunk: structured text becomes nodes, each carrying text, metadata, and relationships. Node count drives how much you embed. Stage four, embed: each node's text becomes a dense vector, priced in tokens, dimensions and API calls. Stage five, index: vectors, nodes and metadata become a searchable structure, a vector store, a sparse index, or a graph. Its cost is memory and build time.
+
+12
+00:04:42,410 --> 00:05:11,410
+Then the query path. Stage six, retrieve: the query meets the index and comes back as a candidate set of scored nodes, priced by search cost and top k. Stage seven, rerank: the candidates are narrowed and better ordered, usually by a cross-encoder or a language model call. Stage eight, assemble: the ordered nodes and a prompt template become the final context string.
+
+13
+00:05:12,160 --> 00:05:37,720
+Stage nine, generate: the prompt and context become answer text, plus whatever provenance survives, priced in tokens in and out and in the choice of model. And stage ten, attribute: the answer and its source nodes become citations, a confidence, or an abstention. That is the whole chain, from a file on disk to a cited answer.
+
+14
+00:05:38,470 --> 00:06:05,310
+Draw the two paths side by side. The ingest path ends in an index, which the query path picks up at retrieve. Now mark each link with the failure it can inject. Load into chunk can inject staleness, F seven. Parse and chunk can inject boundary loss, F three. Embed into index can inject a vocabulary mismatch, F four.
+
+15
+00:06:06,060 --> 00:06:39,300
+On the query side, the index handing off to retrieval can inject a retrieval miss, F one. Retrieve and rerank can inject noise, F two. Assembly can inject context overflow, F five. Generation can inject unfaithful synthesis, F six. And the final answer carries F eight, the budget. Read these labels as where a failure is injected, not where it is detected. The gap between the two is why observability gets its own module.
+
+16
+00:06:40,050 --> 00:07:03,490
+The two paths are not symmetric, and the difference matters. The ingest path runs once per document revision. The query path runs eight thousand five hundred times a day. Ingest work is bulk, batchable, and tolerant of latency. Query work is per question, and must fit inside a two and a half second ninety-fifth percentile.
+
+17
+00:07:04,240 --> 00:07:31,240
+Now compare the cost of a mistake. A query-path mistake costs one answer, it shows up immediately if you are instrumented, and it is cheap to reverse, just retry with a different top k. An ingest-path mistake costs every future query that touches that document. It stays hidden until some query happens to need it, and reversing it can mean re-embedding the whole corpus.
+
+18
+00:07:31,990 --> 00:07:55,510
+That inverts most engineers' intuition. A mistake on the ingest path is more expensive than one on the query path, and invisible for much longer. Our broken query was caused by a parse and chunk decision made weeks before anyone asked it. So run cheap experiments on the query path, and get ingest decisions right the first time, or pay to redo them.
+
+19
+00:07:56,260 --> 00:08:22,380
+These ten stages are not an abstraction imposed on the framework. They are its own decomposition, from the reader that loads documents, through cached transformations, to the synthesizer that writes the answer. So read them as a map of the framework's seams. That is why a failure tagged F four is a defect in an embedding model, not in some vague thing called the pipeline.
+
+20
+00:08:23,130 --> 00:08:45,170
+Let us make that mapping concrete. Each stage corresponds to a real object in LlamaIndex, and that correspondence is the reason this course sticks to one stack. The abstraction boundaries in the library are the stage boundaries in the pipeline. So the question, which stage failed, has a mechanical answer at runtime.
+
+21
+00:08:45,920 --> 00:09:20,400
+Follow the object graph from top to bottom. A reader, such as the simple directory reader, produces documents. A node parser, or a stack of transformations like a sentence splitter, turns documents into nodes. An embedding model turns nodes into vectors, and an index, by default a vector store index, holds them. A retriever pulls candidates. A node postprocessor filters or reranks them. A response synthesizer writes the answer, and the response carries its source nodes.
+
+22
+00:09:21,150 --> 00:09:51,030
+Each link has documented behaviour. The directory reader turns every file in a folder into a document. Transformations take nodes in and return nodes out, and can be stacked and reordered. A retriever returns the top k most similar nodes, ten for example. A similarity postprocessor drops matches below a cutoff, say zero point seven. And the source nodes on the response are what attribution reads.
+
+23
+00:09:51,780 --> 00:10:16,460
+Two properties of this graph matter more than the class names. First, documents and nodes are the same kind of thing at different sizes. A node is a chunk of a document, and by default every node inherits its document's metadata. That rule is why jurisdiction, client, and date survive chunking at all, which is what makes filtered and permissioned retrieval possible later.
+
+24
+00:10:17,210 --> 00:10:42,450
+Second, the pipeline is a composition, not a monolith. The retriever query engine exists so that a retriever and a synthesizer can be chosen independently, with optional postprocessors in between. That seam turns stage by stage substitution, the only real way to attribute a failure, into a configuration change instead of a rewrite.
+
+25
+00:10:43,200 --> 00:11:14,240
+That gives the module's first ledger entry. Pin the stage boundaries to the framework's seams. The cost is that a step spanning two objects, like a rewrite followed by routing, must live inside one of them. It is accepted because chained function calls make every failure unattributable, which is our opening scene. It reverses only if a stage fits no seam, and even then, build a custom component that keeps the interface.
+
+26
+00:11:14,990 --> 00:11:35,950
+Now the connective tissue of the whole course: the failure taxonomy, F one through F eight. Later modules each open on one of these failures, the architecture review reads the mitigations back, and every incident gets triaged into one of these IDs. Later modules reference the IDs. They never redefine them.
+
+27
+00:11:36,700 --> 00:12:09,900
+F one is a retrieval miss. The answer existed in the corpus and was never retrieved, because the relevant node fell outside top k or never made it into the index. It lives in indexing and search, and you first measure it as recall at k on a golden set. F two is retrieval noise. The right chunk was retrieved, but buried under plausible wrong ones, because similarity is not relevance. You measure it with precision, n D C G, and the rank of the first relevant node.
+
+28
+00:12:10,650 --> 00:12:42,250
+F three is chunk-boundary loss. The answer was split across two chunks, because the unit of retrieval is smaller than the unit of meaning, and the generator completes an amputated thought. It lives in parse and chunk. F four is representation mismatch. The user's vocabulary and the corpus vocabulary never meet. Lithium batteries and UN thirty-four eighty are close to a human and far apart in vector space. You measure it as recall on lexical queries specifically.
+
+29
+00:12:43,000 --> 00:13:11,280
+F five is context overflow. The evidence was retrieved, then truncated, or lost in the middle of a long prompt where models attend least. It lives in assembly. F six is unfaithful synthesis: a fluent answer the evidence does not support, because the model fell back on its own memory or overgeneralized, and nothing checked the claim. It lives in generation and attribution, measured as faithfulness and citation precision.
+
+30
+00:13:12,030 --> 00:13:41,750
+F seven is staleness. The index and the corpus have drifted apart: a revision was never ingested, an ingest failed silently, or the index was rebuilt from an old source. It lives across the whole ingest path, and you catch it with a freshness audit. F eight is budget blowout. Cost or latency broke its ceiling, because many individually defensible choices became collectively unaffordable at eight thousand five hundred queries a day.
+
+31
+00:13:42,500 --> 00:14:06,860
+Three properties of this taxonomy carry weight, and you can check each against your own traces. First, the IDs are separated by stage, not by symptom. The answer was wrong is nine different diagnoses. The taxonomy's value is that it turns one symptom into one owning stage, and therefore into one owner and one class of fix.
+
+32
+00:14:07,610 --> 00:14:29,090
+Second, the order of the IDs is the order of the pipeline, so it is also the order of diagnosis. Debug in ascending order. If a stage three boundary severed the answer, no amount of work on stage six will recover it. Worse, a retrieval metric computed over severed chunks will look fine while the answers stay wrong.
+
+33
+00:14:29,840 --> 00:14:51,800
+Third, F eight is a tax on every other fix. Every mitigation for the first seven, a reranker, overlapping chunks, a bigger context, a second checking call, costs tokens or milliseconds. F eight is not a peer. It is the constraint that turns the others into a negotiation.
+
+34
+00:14:52,550 --> 00:15:20,310
+In an incident, you will use the taxonomy as a triage index: what you observe, which failure, where to look first. The answer is absent, and no retrieved node contains it? That is F one. Check the query embedding, then ask whether the node exists in the index at all. The right node came back at rank seven, but the answer used rank one? That is F two. Look at ranking, and at near-duplicates from chunk overlap.
+
+35
+00:15:21,060 --> 00:15:44,180
+The answer is half a sentence, and the other half sits at rank nine? F three: look at chunking and context expansion. The answer is missing for jargon, part numbers, or clause IDs, but appears for plain-language paraphrases? F four: check the embedding model and query-passage symmetry, and try a lexical retriever.
+
+36
+00:15:44,930 --> 00:16:10,890
+The retrieved set is right, but the answer quotes the wrong number from it? That is F five or F six. Check truncation and ordering first, then check the claim against its span. The answer cites a document whose content has changed? F seven: follow the ingest lineage. And everything is correct, but each query costs forty cents and takes nine seconds? F eight: attribute latency and tokens per stage.
+
+37
+00:16:11,640 --> 00:16:39,120
+The taxonomy is also open. Two failures arrive later in the course, added in place rather than renumbered. F nine is poisoned context: content inside your trust boundary carrying instructions meant to be executed. Retrieval worked, the document was in the corpus, and the corpus held an attacker's instruction. None of the first eight mitigations touch it. The security module owns it.
+
+38
+00:16:39,870 --> 00:17:10,230
+F ten is scope leak: evidence retrieved across a boundary the user is not allowed to cross. It is the failure that makes a post-retrieval authorization filter non-negotiable, and the only one whose cost is measured in breaches rather than bad answers. Both sit after F eight because their fixes are orthogonal. Hardening the first eight does not reduce F nine, and fixing F nine does not reduce F ten.
+
+39
+00:17:10,980 --> 00:17:30,940
+Where does evaluation fit? It is not stage eleven. It is a second, parallel pipeline that observes every stage. The design question at each hop is: what artefact do I keep, so that this hop can be scored later? That is a data-model decision, not a metrics decision.
+
+40
+00:17:31,690 --> 00:17:54,410
+For parse and chunk, keep the character offsets from each node back to its source, so you can score answer completeness. For embed, stamp the model ID and version on every node, so a model swap can be measured. For the index, keep node-to-document lineage and ingest timestamps, which power freshness audits and per-source recall.
+
+41
+00:17:55,160 --> 00:18:24,720
+For retrieval, keep the full candidate set with scores, not only the survivors, for recall at k. For rerank, keep the order before and after. For assembly, keep the exact context string, in order, to study faithfulness against length and position. For generation, keep prompt, model, temperature and token counts. For attribution, resolve every cited span to a node ID.
+
+42
+00:18:25,470 --> 00:18:46,950
+The tooling for these metrics belongs to the evaluation module. The point here is structural. A metric with no retained artefact cannot be computed after the fact. Keeping candidate sets and contexts looks like hoarding, until the first incident, when it is the only thing that turns retrieval seems worse into a number.
+
+43
+00:18:47,700 --> 00:19:22,300
+So the second ledger entry: retain the full per-query trace for every production query. The costs are real: storage that grows with volume, a privacy surface, because traces contain client documents, and a retention policy someone must own. It is accepted because this log is the difference between diagnosable and undiagnosable. If residency rules forbid storing context, keep spans, scores and hashes, and accept that faithfulness cannot be re-scored later.
+
+44
+00:19:23,050 --> 00:19:47,450
+Now let us walk the lithium battery question through all ten stages. Stage one, load. The Maersk service agreement, the lane's rate spreadsheet, and four service bulletins are loaded. But the April bulletin arrives in a shared mailbox that no ingest job watches. It is never loaded at all. That is F seven.
+
+45
+00:19:48,200 --> 00:20:22,400
+Stage two, parse. The spreadsheet is flattened to rows, and the dangerous-goods header sits on row three of a two-sheet workbook. The surcharge column is identifiable only if the parser kept row three's labels. Stage three, chunk. The table becomes forty-one nodes, and the surcharge column is split away from its UN number key column. The chunk that will be retrieved has the values, but not the keys that disambiguate them. That is F three.
+
+46
+00:20:23,150 --> 00:20:55,150
+Stage four, embed. The query vector for lithium batteries lands near the commodity rate rows. Lane and container match, the dangerous-goods meaning does not, because the corpus says UN thirty-four eighty. That is F four. Stage five, index. Four hundred and twelve nodes sit in a flat vector index with no metadata filtering. There is no date predicate, so nothing can exclude a superseded rate.
+
+47
+00:20:55,900 --> 00:21:23,220
+Stage six, retrieve. The top ten are six rate-table rows, two unrelated dangerous-goods paragraphs, and two wiki pages. The correct UN thirty-four eighty row is at rank fourteen, outside the cut and unreachable. Stage seven, rerank. Nothing is configured, so it is a pass-through, and the zero euro commodity row stays at rank one with a high score.
+
+48
+00:21:23,970 --> 00:21:52,650
+Stage eight, assemble. Ten nodes, about seven thousand nine hundred tokens, with the strongest candidate sitting sixth of ten, in the middle. Stage nine, generate. The answer: zero euros per forty-foot container. That claim is faithful to the context it was given. The context simply did not contain the answer. Stage ten, attribute. The citation resolves correctly to the rate-table node.
+
+49
+00:21:53,400 --> 00:22:14,720
+Read those last two stages together, because they are the most important thing in this module. Generation was faithful and attribution was correct. The system produced a verifiable, wrong answer, the worst outcome available. A reviewer checks the citation, finds the number, confirms it, and signs off.
+
+50
+00:22:15,470 --> 00:22:41,110
+Then read stages two through six as one causal chain. A parse-level omission, the missing UN number key column, and a vocabulary gap, lithium batteries against UN thirty-four eighty, together pushed the only correct node to rank fourteen. The fix is not a better generator. And it is not a reranker either, because a reranker can only reorder the candidates it was given.
+
+51
+00:22:41,860 --> 00:23:10,620
+So LogiTrack instruments three stages first, and the choice is deliberate. Retrieve, because a candidate-set log is the only way to tell F one from F two. Chunk, because F three is invisible from every other stage. And index, because F seven and F one look identical from the query path, and only lineage separates them. Assembly and generation come second, once the artefact list exists.
+
+52
+00:23:11,370 --> 00:23:42,810
+To finish, a design exercise, done on paper. Draw LogiTrack's pipeline as a schema: ten boxes, each with a typed input and output, annotated so it can serve as an incident runbook. First, give each stage a contract, not a name. Parse, raw text to structured text, guaranteeing every table cell keeps its row and column labels, is a contract. A stage whose contract you cannot state is a stage you cannot test.
+
+53
+00:23:43,560 --> 00:24:09,200
+Second, annotate each stage with its failure IDs and its owner. Some stages inject more than one failure, and some failures come from more than one stage. F one comes from chunking and indexing, and F seven is an ingest failure that presents as a retrieval failure. Where a stage can inject two, say which is likelier in your corpus, and why.
+
+54
+00:24:09,950 --> 00:24:40,390
+Third, mark the three stages you instrument first, and defend them by disambiguation, not importance. An instrumented stage earns its place by separating two failure IDs that look the same from outside. Fourth, name the artefact each one retains, and its cardinality. A candidate-set log at eight thousand five hundred queries a day is a very different object from a lineage table over four hundred eighty thousand documents.
+
+55
+00:24:41,140 --> 00:24:59,220
+Fifth, name one stage you will deliberately leave dark, and the risk you accept. A plan with no exclusions is a plan nobody implements. Senior engineers draw this in the first week, and it is why their teams find the failing stage in minutes, not days.
+
+56
+00:24:59,970 --> 00:25:20,490
+So that is the pipeline: ten named stages, two unequal paths, eight failures with owners, and an evaluation layer that only works if you kept the evidence. Next, module three goes deep on parsing and chunking, the decisions that sever meaning before any other stage can be blamed for losing it.

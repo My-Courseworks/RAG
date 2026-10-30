@@ -1,0 +1,38 @@
+# Labs environment — RAG course
+# Verified against the authoring baseline (2025-10). Pin exact versions in your own deployment;
+# these are lower bounds chosen to match the API surface the modules describe.
+#
+# NOTE: this environment was NOT installed during authoring. The module labs are written to be
+# runnable, but they have not been executed end-to-end in the authoring sandbox — treat them as
+# reviewed code, not as CI-verified code. See labs/README.md for what that means.
+
+# --- reference stack -------------------------------------------------------
+llama-index-core>=0.12
+llama-index-embeddings-openai
+llama-index-llms-openai
+llama-index-vector-stores-qdrant      # M5 lab
+llama-index-vector-stores-postgres    # M5/M6 lab (pgvector)
+llama-index-retrievers-bm25           # M7 hybrid lab
+llama-index-postprocessor-cohere-rerank   # M9 rerank lab (optional)
+llama-index-llms-litellm              # provider routing (any backend)
+litellm>=1.50
+
+# --- retrieval and evaluation ---------------------------------------------
+rank-bm25
+sentence-transformers                  # M9 cross-encoder rerank, M15 fine-tuning
+datasets                               # M15 hard-negative mining
+torch                                  # M15 fine-tuning
+ragas                                  # M13 optional cross-check on eval metrics
+
+# --- storage and serving ---------------------------------------------------
+qdrant-client
+psycopg2-binary                        # pgvector
+redis                                  # M14 ingestion cache
+chromadb                               # M5 comparison baseline
+
+# --- utilities -------------------------------------------------------------
+numpy
+pandas
+tiktoken                               # token counting for M18 budgets
+pypdf                                  # M3 parsing lab
+openpyxl                               # M3 rate-table/XLSX lab
