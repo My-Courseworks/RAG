@@ -46,10 +46,10 @@ scoreboard for the work already done, not a test suite for the work not yet done
 Five standard metrics are in play, and LlamaIndex computes all of them over a ground-truth node
 set: the framework's notebook constructs the evaluator with
 `metrics = ["hit_rate", "mrr", "precision", "recall", "ap", "ndcg"]` and passes it through
-`RetrieverEvaluator.from_metric_names(metrics, retriever=retriever)` [LI-EVR2]; the usage-pattern
-page demonstrates the same call with `["mrr", "hit_rate"]` [LI-EVR]. The guide summarises the family
+`RetrieverEvaluator.from_metric_names(metrics, retriever=retriever)` [[LI-EVR2]](#src-li-evr2); the usage-pattern
+page demonstrates the same call with `["mrr", "hit_rate"]` [[LI-EVR]](#src-li-evr). The guide summarises the family
 the same way: "given a dataset of questions and ground-truth rankings, we can evaluate retrievers
-using ranking metrics like mean-reciprocal rank (MRR), hit-rate, precision, and more" [LI-EV].
+using ranking metrics like mean-reciprocal rank (MRR), hit-rate, precision, and more" [[LI-EV]](#src-li-ev).
 
 Notation: for query $q$, $R_q$ is the ground-truth relevant set, $A_q(k)$ the top-$k$ retrieved
 set, and $\mathrm{rel}_q(i) \in \{0,\dots,g\}$ the graded relevance at rank $i$.
@@ -84,7 +84,7 @@ position in the ranking you scored, while a RAG pipeline consumes the top-$k$ it
 allows (→ M11, M18). Computing AP over a 100-node ranking and feeding 6 nodes to the synthesizer
 means 94% of the number describes a decision the system never makes. The only defensible form is
 $\text{AP@}k$ at the same $k$ the query engine uses. The framework's notebook computes all six
-metrics at whatever $k$ the retriever was built with (`similarity_top_k=2`) [LI-EVR2], which makes
+metrics at whatever $k$ the retriever was built with (`similarity_top_k=2`) [[LI-EVR2]](#src-li-evr2), which makes
 `similarity_top_k` a *metric-defining* parameter, not just a runtime one.
 
 LogiTrack's headline retrieval metric is therefore **recall@10**, whose failure mode (F1 · retrieval
@@ -95,14 +95,14 @@ miss) is unbounded — a chunk never retrieved cannot be recovered downstream �
 > ground-truth node ids — `retriever_evaluator.evaluate(query="query", expected_ids=["node_id1",
 > "node_id2"])` — and the batch path is `await retriever_evaluator.aevaluate_dataset(qa_dataset)`,
 > which the guide notes "should run much faster than you trying to call `.evaluate` on each query
-> separately" [LI-EVR]. Per-query results carry a `metric_vals_dict` for building your own table
-> [LI-EVR2].
+> separately" [[LI-EVR]](#src-li-evr). Per-query results carry a `metric_vals_dict` for building your own table
+> [[LI-EVR2]](#src-li-evr2).
 
 ---
 
 ## The ground truth is a node set, and that decision moves the metric
 
-`RetrieverEvaluator` takes `expected_ids`, not spans [LI-EVR]. Your annotations are span-level
+`RetrieverEvaluator` takes `expected_ids`, not spans [[LI-EVR]](#src-li-evr). Your annotations are span-level
 (M3 annotated each query with its answer's character offsets). Something must convert spans to node
 ids, and the rule is a measurement decision with a larger effect than most retrieval changes:
 
@@ -118,6 +118,11 @@ because a re-chunk invalidates the node ids whether or not the question changed.
 place evaluation acquires a maintenance obligation a software test does not have: the test's
 fixtures are stable; yours are derived from a corpus that is being re-ingested (→ M14).
 
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — for tables, scans and figures, the parser decides what the answer span even is.
+> - Spans are offsets into *parsed text*; a new OCR or table reader moves them, so re-derive exactly as for a re-chunk (→ [M3](../03-parsing-and-chunking/README.md)).
+> - A parser that drops a table or caption makes an answerable query look unanswerable; annotate against the source page, not the parser output.
+> - Check parse quality on its own (e.g. sampled rate-table cells) before trusting retrieval metrics on those queries (→ [M14](../14-ingestion-at-scale/README.md)).
+
 ---
 
 ## Generation metrics are four failure axes, not one score
@@ -126,9 +131,9 @@ Both flagship frameworks say the generation side is several dimensions at once. 
 evaluation as "the ability of the retrieval system to identify relevant and focused context
 passages, the ability of the LLM to exploit such passages in a faithful way, or the quality of the
 generation itself", and presents "a suite of metrics which can be used to evaluate these different
-dimensions without having to rely on ground truth human annotations" [RAGAS23]. ARES names three in
+dimensions without having to rely on ground truth human annotations" [[RAGAS23]](#src-ragas23). ARES names three in
 its own vocabulary: "evaluating RAG systems along the dimensions of context relevance, answer
-faithfulness, and answer relevance" [ARES23].
+faithfulness, and answer relevance" [[ARES23]](#src-ares23).
 
 | Axis | The question | Fails independently when | Ground truth needed? |
 |---|---|---|---|
@@ -139,7 +144,7 @@ faithfulness, and answer relevance" [ARES23].
 
 That last column is the operational fact the framework states plainly: "Note that many of these
 current evaluation modules do *not* require ground-truth labels. Evaluation can be done with some
-combination of the query, context, response, and combine these with LLM calls" [LI-EV]. It is also
+combination of the query, context, response, and combine these with LLM calls" [[LI-EV]](#src-li-ev). It is also
 the source of the field's biggest disagreement, because reference-free does not mean cheap: the
 label was replaced by an LLM call whose reliability is now the thing you must measure.
 
@@ -163,21 +168,21 @@ notices immediately.
 
 | Primitive | Documented behaviour | Axis | Interface |
 |---|---|---|---|
-| `FaithfulnessEvaluator` | "evaluates if the answer is faithful to the retrieved contexts (in other words, whether if there's hallucination)" [LI-EVU] | Faithfulness | `evaluate_response(response=response)`, or `evaluate(response=..., contexts=[node.get_content()])` per node |
-| `RelevancyEvaluator` | "evaluates if the retrieved context and the answer is relevant and consistent for the given query"; "requires the `query` to be passed in, in addition to the `Response` object" [LI-EVU] | Answer relevance **and** context relevance, jointly | `evaluate_response(query=query, response=response)` |
-| `CorrectnessEvaluator` | "Whether the generated answer matches that of the reference answer given the query (requires labels)" [LI-EV] | Correctness | Needs a reference answer |
-| `SemanticSimilarityEvaluator` | "Whether the predicted answer is semantically similar to the reference answer (requires labels)" [LI-EV] | Correctness, softly | Needs a reference answer |
-| `RetrieverEvaluator` | Retrieval metrics over `expected_ids`, via `from_metric_names([...])` [LI-EVR] | Context recall (partially) | `evaluate(query, expected_ids)`, `aevaluate_dataset(qa_dataset)` |
-| `BatchEvalRunner` | Runs "a set of evaluators across many questions" with `workers=8` [LI-EVU] | All of the above at scale | `await runner.aevaluate_queries(query_engine, queries=questions)` |
+| `FaithfulnessEvaluator` | "evaluates if the answer is faithful to the retrieved contexts (in other words, whether if there's hallucination)" [[LI-EVU]](#src-li-evu) | Faithfulness | `evaluate_response(response=response)`, or `evaluate(response=..., contexts=[node.get_content()])` per node |
+| `RelevancyEvaluator` | "evaluates if the retrieved context and the answer is relevant and consistent for the given query"; "requires the `query` to be passed in, in addition to the `Response` object" [[LI-EVU]](#src-li-evu) | Answer relevance **and** context relevance, jointly | `evaluate_response(query=query, response=response)` |
+| `CorrectnessEvaluator` | "Whether the generated answer matches that of the reference answer given the query (requires labels)" [[LI-EV]](#src-li-ev) | Correctness | Needs a reference answer |
+| `SemanticSimilarityEvaluator` | "Whether the predicted answer is semantically similar to the reference answer (requires labels)" [[LI-EV]](#src-li-ev) | Correctness, softly | Needs a reference answer |
+| `RetrieverEvaluator` | Retrieval metrics over `expected_ids`, via `from_metric_names([...])` [[LI-EVR]](#src-li-evr) | Context recall (partially) | `evaluate(query, expected_ids)`, `aevaluate_dataset(qa_dataset)` |
+| `BatchEvalRunner` | Runs "a set of evaluators across many questions" with `workers=8` [[LI-EVU]](#src-li-evu) | All of the above at scale | `await runner.aevaluate_queries(query_engine, queries=questions)` |
 
 Row two contains an ambiguity that bites. The guide describes `RelevancyEvaluator` as measuring
 whether "the retrieved context **and** the answer is relevant and consistent for the given query"
-[LI-EVU] — a *conjunction*, one result over two variables — while RAGAS and ARES keep the two
-separate [RAGAS23][ARES23]. The framework's answer is to evaluate per source node with
-`contexts=[source_node.get_content()]`, turning the conjunction into one result per node [LI-EVU],
+[[LI-EVU]](#src-li-evu) — a *conjunction*, one result over two variables — while RAGAS and ARES keep the two
+separate [[RAGAS23]](#src-ragas23)[[ARES23]](#src-ares23). The framework's answer is to evaluate per source node with
+`contexts=[source_node.get_content()]`, turning the conjunction into one result per node [[LI-EVU]](#src-li-evu),
 but the guide's terminology does not distinguish the two axes, so build the split explicitly.
 Every output is an `EvaluationResult` with `passing`, `score`, and `feedback`, and "different
-evaluators may populate a subset of the result fields" [LI-EVU] — so do not assume `score` exists.
+evaluators may populate a subset of the result fields" [[LI-EVU]](#src-li-evu) — so do not assume `score` exists.
 
 > **Tradeoff (the ledger entry M13-1).** *Decision:* make faithfulness the non-regressing gate
 > metric and treat context recall, nDCG@10, and cost as reported-with-margin metrics.
@@ -192,37 +197,42 @@ evaluators may populate a subset of the result fields" [LI-EVU] — so do not as
 
 ## LLM-as-a-judge: what it agrees with, and the three biases you must price
 
-Because most generation axes are reference-free [LI-EV], and because the guide states the mechanism
+Because most generation axes are reference-free [[LI-EV]](#src-li-ev), and because the guide states the mechanism
 plainly — "This uses a 'gold' LLM (e.g. GPT-4) to decide whether the predicted answer is correct in
-a variety of ways" [LI-EV] — the generation half of your harness rests on a judge. That makes the
+a variety of ways" [[LI-EV]](#src-li-ev) — the generation half of your harness rests on a judge. That makes the
 judge a *component under test*, not an oracle. MT-Bench both licenses and bounds the practice:
 "We examine the usage and limitations of LLM-as-a-judge, including position, verbosity, and
 self-enhancement biases, as well as limited reasoning ability, and propose solutions to mitigate
 some of them", and it reports that "strong LLM judges like GPT-4 can match both controlled and
 crowdsourced human preferences well, achieving over 80% agreement, the same level of agreement
-between humans" [JUDGE23].
+between humans" [[JUDGE23]](#src-judge23).
 
 Self-preference has the clearest mechanism. Wataoka and colleagues introduce "a novel quantitative
 metric to measure the self-preference bias", report that "GPT-4 exhibits a significant degree of
 self-preference bias", and locate the cause: "LLMs assign significantly higher evaluations to
 outputs with lower perplexity than human evaluators, regardless of whether the outputs were
 self-generated. This suggests that the essence of the bias lies in perplexity and that the
-self-preference bias exists because LLMs prefer texts more familiar to them" [SELFJUDGE23]. That
+self-preference bias exists because LLMs prefer texts more familiar to them" [[SELFJUDGE23]](#src-selfjudge23). That
 last sentence changes harness design: the fix is not merely a judge from a different model family —
 the mechanism is *familiarity*, so any judge favours whatever prose most resembles its own training
 distribution. Tune your generator on the judge's corpus and you have built the bias in on purpose.
 
 | Bias | Documented shape | Mitigation | Residual risk |
 |---|---|---|---|
-| **Position** | Preference depends on which candidate is shown first [JUDGE23] | Score both orderings and average; discard pairs where the orderings disagree | Doubles judge cost; the disagreement rate becomes its own metric |
-| **Verbosity** | Longer answers preferred [JUDGE23] | Rubrics scoring *claims present or absent* rather than overall quality; a length-control instruction; report the answer-length distribution alongside the score | An enumerating rubric approaches a hand-check and loses the cost advantage |
-| **Self-preference** | Judge favours lower-perplexity text; the effect tracks familiarity, not authorship [JUDGE23][SELFJUDGE23] | Cross-family judge, **and** periodic re-derivation of judge-human agreement on *your* corpus | Every judge has a familiarity profile; the only real control is a human-anchored sample |
-| **Limited reasoning** | Weak on tasks needing chains of inference [JUDGE23] | Route multi-hop and numeric-extraction claims to correctness-with-reference or human review | Those are exactly the classes where judging is hardest and matters most |
+| **Position** | Preference depends on which candidate is shown first [[JUDGE23]](#src-judge23) | Score both orderings and average; discard pairs where the orderings disagree | Doubles judge cost; the disagreement rate becomes its own metric |
+| **Verbosity** | Longer answers preferred [[JUDGE23]](#src-judge23) | Rubrics scoring *claims present or absent* rather than overall quality; a length-control instruction; report the answer-length distribution alongside the score | An enumerating rubric approaches a hand-check and loses the cost advantage |
+| **Self-preference** | Judge favours lower-perplexity text; the effect tracks familiarity, not authorship [[JUDGE23]](#src-judge23)[[SELFJUDGE23]](#src-selfjudge23) | Cross-family judge, **and** periodic re-derivation of judge-human agreement on *your* corpus | Every judge has a familiarity profile; the only real control is a human-anchored sample |
+| **Limited reasoning** | Weak on tasks needing chains of inference [[JUDGE23]](#src-judge23) | Route multi-hop and numeric-extraction claims to correctness-with-reference or human review | Those are exactly the classes where judging is hardest and matters most |
 
 The rule: **calibrate the judge, then gate on the judge.** Calibration means a stratified sample of
 the golden set, hand-labelled, with judge-human agreement reported as a number you maintain —
 invalidated the moment you change judge model, judge prompt, or generator. That is the eval set's
 own maintenance obligation applied to the instrument.
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — a text judge sees the table's serialization, never the table.
+> - Faithfulness 1.0 against a mis-extracted rate table is still a wrong answer; the judge cannot tell.
+> - Keep table- and figure-derived claims on correctness-with-reference, as with the numeric stratum above.
+> - Deferred: evaluating image retrieval itself. LlamaIndex has `MultiModalRetrieverEvaluator` and multi-modal faithfulness/relevancy evaluators judged by a multi-modal LLM ([docs](https://developers.llamaindex.ai/python/examples/evaluation/multi_modal/multi_modal_rag_evaluation)); out of scope per the [syllabus](../../syllabus.md#1-scope-knobs-frozen).
 
 > **Tradeoff (the ledger entry M13-2).** *Decision:* use an LLM judge for faithfulness,
 > recalibrated against a hand-labelled sample at every judge or generator change, and never for the
@@ -240,9 +250,9 @@ own maintenance obligation applied to the instrument.
 The framework offers synthetic generation as the shortcut that makes all of this affordable:
 `generate_question_context_pairs(nodes, llm=llm, num_questions_per_chunk=2)`, which "uses the LLM
 to auto-generate questions from each context chunk" and returns an `EmbeddingQAFinetuneDataset`
-"containing `queries`, `relevant_docs`, and `corpus`" [LI-EVR]; and
+"containing `queries`, `relevant_docs`, and `corpus`" [[LI-EVR]](#src-li-evr); and
 `RagDatasetGenerator.from_documents(...)` followed by `generate_questions_from_nodes()`, documented
-under "Question Generation" as creating "a fully automated evaluation flow over your data" [LI-EVU].
+under "Question Generation" as creating "a fully automated evaluation flow over your data" [[LI-EVU]](#src-li-evu).
 
 Both work by the same mechanism, and that mechanism is the trap: **the query is generated *from* a
 chunk, and that chunk is simultaneously declared the ground truth.** The evaluation set is produced
@@ -267,9 +277,9 @@ near-duplicates and which M14 exists to shrink. Two consequences, and they are d
    calibrated on synthetic queries under-fires.
 
 The framework's own two-step structure exposes the fix: the retriever guide presents "Dataset
-generation" and "Retrieval Evaluation" as separate steps [LI-EV], and offers manual curation as the
+generation" and "Retrieval Evaluation" as separate steps [[LI-EV]](#src-li-ev), and offers manual curation as the
 first-class alternative — "You can manually curate a retrieval evaluation dataset of questions +
-node id's" [LI-EVR]. Manual curation is the only path whose ground truth is not derived from the
+node id's" [[LI-EVR]](#src-li-evr). Manual curation is the only path whose ground truth is not derived from the
 retrieval target.
 
 | Use | Synthetic generation | Because |
@@ -312,6 +322,12 @@ Two thirds of the frame is decided by asking *what should be blocked*, not *what
 unanswerable stratum is the one an unstratified 60-query set never contains — nobody writing
 queries from their own corpus writes one the corpus cannot answer — and it is the only stratum
 measuring the outcome the opening scene's compliance incident produced.
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — stratify by *where the evidence lives*, not only by query type.
+> - Tag each query with its evidence form: prose, table cell, scanned page, figure caption or stamp.
+>   - The 70 numeric-extraction queries split across XLSX/HTML rate tables (tariff rates) and tables inside PDFs (DG surcharges); tag which (→ [M3](../03-parsing-and-chunking/README.md)).
+> - Report recall@10 and faithfulness per form; a table or OCR parser regression shows up there first.
+> - Same sizing limit as any stratum: ~50 queries gives a ±0.11 CI, so per-form numbers are directional.
 
 **Sizing.** For a proportion metric, $\text{SE} = \sqrt{p(1-p)/n}$. At $p = 0.8$, $n = 400$:
 
@@ -398,16 +414,16 @@ path built on `MockLLM(max_tokens=256)` and `MockEmbedding(embed_dim=1536)` wire
 `Settings.llm` and `Settings.embed_model`, with `TokenCountingHandler` reading out
 `total_embedding_token_count`, `prompt_llm_token_count`, and `completion_llm_token_count` — the
 documented purpose being "to predict token usage of LLM and embedding calls ... during 1) index
-construction, and 2) index querying, before any respective LLM calls are made" [LI-EVC]. M18's cost
+construction, and 2) index querying, before any respective LLM calls are made" [[LI-EVC]](#src-li-evc). M18's cost
 model leans on exactly this.
 
 > **LlamaIndex at a glance:** the batch runner is `BatchEvalRunner`, constructed as
 > `BatchEvalRunner({"faithfulness": faithfulness_evaluator, "relevancy": relevancy_evaluator},
 > workers=8)` and driven by `await runner.aevaluate_queries(vector_index.as_query_engine(),
-> queries=questions)` [LI-EVU]. Two details make it a harness component: the evaluator dict lets you
+> queries=questions)` [[LI-EVU]](#src-li-evu). Two details make it a harness component: the evaluator dict lets you
 > name the axes yourself, which is how the conjunction problem gets fixed in practice; and `workers`
 > is your concurrency lever against rate limits — the notebook's own run shows the framework
-> retrying through `RateLimitError: Error code: 429` several times [LI-EVR2].
+> retrying through `RateLimitError: Error code: 429` several times [[LI-EVR2]](#src-li-evr2).
 
 ---
 
@@ -417,7 +433,7 @@ The lab is the harness itself: build it once, then score every architecture the 
 against the 400-query set. Retrieval columns from `RetrieverEvaluator` with
 `["recall", "ndcg", "mrr", "ap"]`; generation columns from `FaithfulnessEvaluator` and per-node
 `RelevancyEvaluator` through `BatchEvalRunner`; cost from `TokenCountingHandler`
-[LI-EVR][LI-EVU][LI-EVC].
+[[LI-EVR]](#src-li-evr)[[LI-EVU]](#src-li-evu)[[LI-EVC]](#src-li-evc).
 
 | System (owner) | recall@10 | nDCG@10 | Faithfulness | Context precision | Context recall | Abstention correct | $/query | p95 ms |
 |---|---|---|---|---|---|---|---|---|
@@ -488,7 +504,7 @@ fails.
    documented override, and — the one that matters — what new query gets added to the set as a
    result of the failure.
 7. **Price the harness.** Estimate judge calls, tokens, and wall-clock for the full run and the PR
-   subset using `MockLLM`/`MockEmbedding` prediction rather than a guess [LI-EVC]. If the full run
+   subset using `MockLLM`/`MockEmbedding` prediction rather than a guess [[LI-EVC]](#src-li-evc). If the full run
    cannot happen per merge, say which metrics are nightly-only and how a nightly regression is
    allowed to affect a release.
 
@@ -506,13 +522,13 @@ calibrate, and a set that decays are the price of being able to answer the modul
 
 - **"LLM judges agree with humans well enough to gate a release."** MT-Bench reports that "strong
   LLM judges like GPT-4 can match both controlled and crowdsourced human preferences well, achieving
-  over 80% agreement, the same level of agreement between humans" [JUDGE23] — which, if it held for
+  over 80% agreement, the same level of agreement between humans" [[JUDGE23]](#src-judge23) — which, if it held for
   your task, would justify gating. The TREC 2024 RAG Track's support-assessment study found
   something materially weaker on exactly this axis: "for 56% of the manual from-scratch assessments,
   human and GPT-4o predictions match perfectly (on a three-level scale), increasing to 72% in the
   manual with post-editing condition", while also reporting that "an independent human judge
   correlates better with GPT-4o than a human judge, suggesting that LLM judges can be a reliable
-  alternative for support assessment" [TRECSUP25]. The two papers measure different things —
+  alternative for support assessment" [[TRECSUP25]](#src-trecsup25). The two papers measure different things —
   *pairwise preference between chatbots* versus *a three-level ground-truth-support judgment* — and
   that is the disagreement in one line: preference agreement transfers poorly to veridical
   assessment. **What to change:** calibrate the judge on *your* task, not the task a benchmark
@@ -524,21 +540,21 @@ calibrate, and a set that decays are the price of being able to answer the modul
   generating not only synthetic judgments but also synthetic queries", and concludes: "Our
   experiments indicate that using LLMs it is possible to construct synthetic test collections that
   can reliably be used for retrieval evaluation" — while itself naming the hazard, analysing "the
-  potential risks of bias such test collections may exhibit towards LLM-based models" [STC24].
+  potential risks of bias such test collections may exhibit towards LLM-based models" [[STC24]](#src-stc24).
   **This module's argument is narrower and does not contradict it**, which is the honest way to
   report it: the framework's *default* mechanism — a query conditioned on a chunk, with that same
-  chunk written in as ground truth [LI-EVR][LI-EVU] — is not the construction the study evaluates.
+  chunk written in as ground truth [[LI-EVR]](#src-li-evr)[[LI-EVU]](#src-li-evu) — is not the construction the study evaluates.
   **What to change:** if you use synthetic generation, reproduce the studied construction
   (independent queries, generated *judgments*), not the convenience function, and report which one
   you used.
 - **"Reference-free evaluation means you do not need labels."** RAGAS presents "a suite of metrics
   which can be used to evaluate these different dimensions without having to rely on ground truth
-  human annotations" [RAGAS23], and the guide says the same for many of its evaluators [LI-EV].
+  human annotations" [[RAGAS23]](#src-ragas23), and the guide says the same for many of its evaluators [[LI-EV]](#src-li-ev).
   ARES, published weeks later for the same purpose, takes the opposite position: "To mitigate
   potential prediction errors, ARES utilizes a small set of human-annotated datapoints for
   prediction-powered inference (PPI)", across "eight different knowledge-intensive tasks in KILT,
   SuperGLUE, and AIS", and it "accurately evaluates RAG systems while using only a few hundred human
-  annotations during evaluation" [ARES23]. **What to change:** read "reference-free" as
+  annotations during evaluation" [[ARES23]](#src-ares23). **What to change:** read "reference-free" as
   "reference-free at scale, label-anchored at calibration" — RAGAS's contribution is removing the
   per-example label, ARES's is proving that a few hundred labels buy a documented bias correction.
   That is a budget, not a philosophical conflict, and Entry M13-2 is its engineering form.
@@ -547,24 +563,24 @@ calibrate, and a set that decays are the price of being able to answer the modul
   advanced LLMs achieve <=34% accuracy on CRAG, adding RAG in a straightforward manner improves the
   accuracy only to 44%", and that "state-of-the-art industry RAG solutions only answer 63% of
   questions without any hallucination" — while also finding "much lower accuracy in answering
-  questions regarding facts with higher dynamism, lower popularity, or higher complexity" [CRAG24].
+  questions regarding facts with higher dynamism, lower popularity, or higher complexity" [[CRAG24]](#src-crag24).
   The framework guide adds the contamination counterpoint for a different benchmark: "HotpotQA is
   evaluated on a Wikipedia corpus. LLMs, especially GPT4, tend to have memorized information from
   Wikipedia relatively well. Hence, the benchmark is not particularly good for evaluating retrieval
-  + rerank systems with knowledgeable models like GPT4" [LI-CWE]. **What to change:** use public
+  + rerank systems with knowledgeable models like GPT4" [[LI-CWE]](#src-li-cwe). **What to change:** use public
   benchmarks for model *selection*, never for release gating. CRAG's 34%-to-44% gap describes a
   general web corpus with high-dynamism questions; LogiTrack's corpus is 3,000 private freight
   documents no model has memorised — which cuts both ways, because no benchmark has ever measured a
   system like yours either. The framework guide agrees in its own words: BEIR [`[BEIR21]`, surveyed
   in M4] is "more helpful when you have a unique model that you want to evaluate", best used to
   check "whether and by how much its performance degrades on a diverse set of domains" — a drift
-  instrument, not a score [LI-CWE]. The community's answer has been to standardize the *submission
+  instrument, not a score [[LI-CWE]](#src-li-cwe). The community's answer has been to standardize the *submission
   interface* rather than the corpus: the TREC 2024 RAG Track shipped a reusable framework, a chosen
   collection (MS MARCO V2.1), and "standardized the I/O definitions which assist the end user" so
-  systems can be compared even when they share no corpus with yours [RAGNAROK24].
+  systems can be compared even when they share no corpus with yours [[RAGNAROK24]](#src-ragnarok24).
 - **"There is a best retrieval metric."** This module reports five, defines each, and refuses to
   rank them; the framework's notebook computes `["hit_rate", "mrr", "precision", "recall", "ap",
-  "ndcg"]` as a set [LI-EVR2]. The real disagreement is not which metric is correct but whether a
+  "ndcg"]` as a set [[LI-EVR2]](#src-li-evr2). The real disagreement is not which metric is correct but whether a
   single headline number is acceptable — and the arithmetic above is the argument: each metric's
   blind spot is another's job, $\text{AP}$ measured past your context budget scores a ranking you do
   not ship, and nDCG's gain and discount are assumptions you must state. **What to change:** name the
@@ -575,21 +591,21 @@ calibrate, and a set that decays are the price of being able to answer the modul
 
 ## Sources
 
-- [Evaluating](https://developers.llamaindex.ai/python/framework/module_guides/evaluating/) — `[LI-EV]` · owns the response/retrieval evaluation split, the evaluator taxonomy, the reference-free claim, and question generation as a workflow.
-- [Usage Pattern (Response Evaluation)](https://developers.llamaindex.ai/python/framework/module_guides/evaluating/usage_pattern/) — `[LI-EVU]` · owns `BaseEvaluator`, `EvaluationResult`'s `passing`/`score`/`feedback`, `FaithfulnessEvaluator`, `RelevancyEvaluator`, `RagDatasetGenerator`, and `BatchEvalRunner`.
-- [Usage Pattern (Retrieval)](https://developers.llamaindex.ai/python/framework/module_guides/evaluating/usage_pattern_retrieval/) — `[LI-EVR]` · owns `RetrieverEvaluator.from_metric_names`, `generate_question_context_pairs`, `EmbeddingQAFinetuneDataset`, and `aevaluate_dataset`.
-- [Retrieval Evaluation](https://developers.llamaindex.ai/python/examples/evaluation/retrieval/retriever_eval/) — `[LI-EVR2]` · owns the six-metric `metrics` list, `metric_vals_dict` per query, the `similarity_top_k=2` example, and the observed 429 retries under batch load.
-- [Cost Analysis — Usage Pattern](https://developers.llamaindex.ai/python/framework/understanding/evaluating/cost_analysis/usage_pattern/) — `[LI-EVC]` · owns `MockLLM`/`MockEmbedding` token prediction and `TokenCountingHandler`'s counters.
-- [Component Wise Evaluation](https://developers.llamaindex.ai/python/framework/optimizing/evaluation/component_wise_evaluation/) — `[LI-CWE]` · owns the isolate-the-component argument, BEIR as a domain-shift instrument, and the HotpotQA memorization caveat.
-- *Ragas: Automated Evaluation of Retrieval Augmented Generation* — Shahul Es, Jithin James, Luis Espinosa-Anke, Steven Schockaert · arXiv:2309.15217 (2023) · [arxiv.org/abs/2309.15217](https://arxiv.org/abs/2309.15217) — `[RAGAS23]` · owns the reference-free RAG metric suite and the dimension decomposition.
-- *ARES: An Automated Evaluation Framework for Retrieval-Augmented Generation Systems* — Jon Saad-Falcon, Omar Khattab, Christopher Potts, Matei Zaharia · arXiv:2311.09476 (NAACL 2024) · [arxiv.org/abs/2311.09476](https://arxiv.org/abs/2311.09476) — `[ARES23]` · owns context relevance / answer faithfulness / answer relevance as judged dimensions and prediction-powered inference with a small human-labelled set.
-- *Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena* — Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin, Zhuohan Li, Dacheng Li, Eric P. Xing, Hao Zhang, Joseph E. Gonzalez, Ion Stoica · arXiv:2306.05685 (NeurIPS 2023 Datasets and Benchmarks) · [arxiv.org/abs/2306.05685](https://arxiv.org/abs/2306.05685) — `[JUDGE23]` · owns position, verbosity and self-enhancement bias, limited reasoning, and the >80% human-agreement result.
-- *Self-Preference Bias in LLM-as-a-Judge* — Koki Wataoka, Tsubasa Takahashi, Ryokan Ri · arXiv:2410.21819 (NeurIPS 2024 Safe Generative AI Workshop) · [arxiv.org/abs/2410.21819](https://arxiv.org/abs/2410.21819) — `[SELFJUDGE23]` · owns the quantitative self-preference metric and the perplexity explanation of the bias.
-- *Support Evaluation for the TREC 2024 RAG Track: Comparing Human versus LLM Judges* — Nandan Thakur, Ronak Pradeep, Shivani Upadhyay, Daniel Campos, Nick Craswell, Jimmy Lin · arXiv:2504.15205 (SIGIR 2025) · [arxiv.org/abs/2504.15205](https://arxiv.org/abs/2504.15205) — `[TRECSUP25]` · owns the human-vs-GPT-4o support-agreement rates on the TREC RAG Track submissions.
-- *Ragnarök: A Reusable RAG Framework and Baselines for TREC 2024 Retrieval-Augmented Generation Track* — Ronak Pradeep, Nandan Thakur, Sahel Sharifymoghaddam, Eric Zhang, Ryan Nguyen, Daniel Campos, Nick Craswell, Jimmy Lin · arXiv:2406.16828 (2024) · [arxiv.org/abs/2406.16828](https://arxiv.org/abs/2406.16828) — `[RAGNAROK24]` · owns the TREC 2024 RAG Track's reusable framework, the MS MARCO V2.1 collection choice, and standardized RAG I/O.
-- *CRAG — Comprehensive RAG Benchmark* — Xiao Yang, Kai Sun, Hao Xin, Yushi Sun, Nikita Bhalla, Xiangsen Chen, Sajal Choudhary, Rongze Daniel Gui, Ziran Will Jiang, Ziyu Jiang, Lingkun Kong, Brian Moran, Jiaqi Wang, Yifan Ethan Xu, An Yan, Chenyu Yang, Eting Yuan, Hanwen Zha, Nan Tang, Lei Chen, Nicolas Scheffer, Yue Liu, Nirav Shah, Rakesh Wanga, Anuj Kumar, Wen-tau Yih, Xin Luna Dong · arXiv:2406.04744 (NeurIPS 2024 Datasets and Benchmarks) · [arxiv.org/abs/2406.04744](https://arxiv.org/abs/2406.04744) — `[CRAG24]` · owns the 4,409-question factual QA benchmark, its five domains / eight question categories, and the accuracy and hallucination figures. · **M16** owns the survey of this dataset's benchmark use.
-- *Synthetic Test Collections for Retrieval Evaluation* — Hossein A. Rahmani, Nick Craswell, Emine Yilmaz, Bhaskar Mitra, Daniel Campos · arXiv:2405.07767 (SIGIR 2024) · [arxiv.org/abs/2405.07767](https://arxiv.org/abs/2405.07767) — `[STC24]` · owns the fully-synthetic test-collection feasibility result and the LLM-bias risk it identifies in such collections.
-- *BEIR: A Heterogeneous Benchmark for Zero-shot Evaluation of Information Retrieval Models* — owned by **M4**, surveyed there; cited here only as the instrument the framework guide recommends for detecting post-fine-tuning domain shift [LI-CWE] — `[BEIR21]`. This entry is a cross-reference, not a survey: **M4** owns the
+- <a id="src-li-ev"></a>[Evaluating](https://developers.llamaindex.ai/python/framework/module_guides/evaluating/) — `[LI-EV]` · owns the response/retrieval evaluation split, the evaluator taxonomy, the reference-free claim, and question generation as a workflow.
+- <a id="src-li-evu"></a>[Usage Pattern (Response Evaluation)](https://developers.llamaindex.ai/python/framework/module_guides/evaluating/usage_pattern/) — `[LI-EVU]` · owns `BaseEvaluator`, `EvaluationResult`'s `passing`/`score`/`feedback`, `FaithfulnessEvaluator`, `RelevancyEvaluator`, `RagDatasetGenerator`, and `BatchEvalRunner`.
+- <a id="src-li-evr"></a>[Usage Pattern (Retrieval)](https://developers.llamaindex.ai/python/framework/module_guides/evaluating/usage_pattern_retrieval/) — `[LI-EVR]` · owns `RetrieverEvaluator.from_metric_names`, `generate_question_context_pairs`, `EmbeddingQAFinetuneDataset`, and `aevaluate_dataset`.
+- <a id="src-li-evr2"></a>[Retrieval Evaluation](https://developers.llamaindex.ai/python/examples/evaluation/retrieval/retriever_eval/) — `[LI-EVR2]` · owns the six-metric `metrics` list, `metric_vals_dict` per query, the `similarity_top_k=2` example, and the observed 429 retries under batch load.
+- <a id="src-li-evc"></a>[Cost Analysis — Usage Pattern](https://developers.llamaindex.ai/python/framework/understanding/evaluating/cost_analysis/usage_pattern/) — `[LI-EVC]` · owns `MockLLM`/`MockEmbedding` token prediction and `TokenCountingHandler`'s counters.
+- <a id="src-li-cwe"></a>[Component Wise Evaluation](https://developers.llamaindex.ai/python/framework/optimizing/evaluation/component_wise_evaluation/) — `[LI-CWE]` · owns the isolate-the-component argument, BEIR as a domain-shift instrument, and the HotpotQA memorization caveat.
+- <a id="src-ragas23"></a>*Ragas: Automated Evaluation of Retrieval Augmented Generation* — Shahul Es, Jithin James, Luis Espinosa-Anke, Steven Schockaert · arXiv:2309.15217 (2023) · [arxiv.org/abs/2309.15217](https://arxiv.org/abs/2309.15217) — `[RAGAS23]` · owns the reference-free RAG metric suite and the dimension decomposition.
+- <a id="src-ares23"></a>*ARES: An Automated Evaluation Framework for Retrieval-Augmented Generation Systems* — Jon Saad-Falcon, Omar Khattab, Christopher Potts, Matei Zaharia · arXiv:2311.09476 (NAACL 2024) · [arxiv.org/abs/2311.09476](https://arxiv.org/abs/2311.09476) — `[ARES23]` · owns context relevance / answer faithfulness / answer relevance as judged dimensions and prediction-powered inference with a small human-labelled set.
+- <a id="src-judge23"></a>*Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena* — Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin, Zhuohan Li, Dacheng Li, Eric P. Xing, Hao Zhang, Joseph E. Gonzalez, Ion Stoica · arXiv:2306.05685 (NeurIPS 2023 Datasets and Benchmarks) · [arxiv.org/abs/2306.05685](https://arxiv.org/abs/2306.05685) — `[JUDGE23]` · owns position, verbosity and self-enhancement bias, limited reasoning, and the >80% human-agreement result.
+- <a id="src-selfjudge23"></a>*Self-Preference Bias in LLM-as-a-Judge* — Koki Wataoka, Tsubasa Takahashi, Ryokan Ri · arXiv:2410.21819 (NeurIPS 2024 Safe Generative AI Workshop) · [arxiv.org/abs/2410.21819](https://arxiv.org/abs/2410.21819) — `[SELFJUDGE23]` · owns the quantitative self-preference metric and the perplexity explanation of the bias.
+- <a id="src-trecsup25"></a>*Support Evaluation for the TREC 2024 RAG Track: Comparing Human versus LLM Judges* — Nandan Thakur, Ronak Pradeep, Shivani Upadhyay, Daniel Campos, Nick Craswell, Jimmy Lin · arXiv:2504.15205 (SIGIR 2025) · [arxiv.org/abs/2504.15205](https://arxiv.org/abs/2504.15205) — `[TRECSUP25]` · owns the human-vs-GPT-4o support-agreement rates on the TREC RAG Track submissions.
+- <a id="src-ragnarok24"></a>*Ragnarök: A Reusable RAG Framework and Baselines for TREC 2024 Retrieval-Augmented Generation Track* — Ronak Pradeep, Nandan Thakur, Sahel Sharifymoghaddam, Eric Zhang, Ryan Nguyen, Daniel Campos, Nick Craswell, Jimmy Lin · arXiv:2406.16828 (2024) · [arxiv.org/abs/2406.16828](https://arxiv.org/abs/2406.16828) — `[RAGNAROK24]` · owns the TREC 2024 RAG Track's reusable framework, the MS MARCO V2.1 collection choice, and standardized RAG I/O.
+- <a id="src-crag24"></a>*CRAG — Comprehensive RAG Benchmark* — Xiao Yang, Kai Sun, Hao Xin, Yushi Sun, Nikita Bhalla, Xiangsen Chen, Sajal Choudhary, Rongze Daniel Gui, Ziran Will Jiang, Ziyu Jiang, Lingkun Kong, Brian Moran, Jiaqi Wang, Yifan Ethan Xu, An Yan, Chenyu Yang, Eting Yuan, Hanwen Zha, Nan Tang, Lei Chen, Nicolas Scheffer, Yue Liu, Nirav Shah, Rakesh Wanga, Anuj Kumar, Wen-tau Yih, Xin Luna Dong · arXiv:2406.04744 (NeurIPS 2024 Datasets and Benchmarks) · [arxiv.org/abs/2406.04744](https://arxiv.org/abs/2406.04744) — `[CRAG24]` · owns the 4,409-question factual QA benchmark, its five domains / eight question categories, and the accuracy and hallucination figures. · **M16** owns the survey of this dataset's benchmark use.
+- <a id="src-stc24"></a>*Synthetic Test Collections for Retrieval Evaluation* — Hossein A. Rahmani, Nick Craswell, Emine Yilmaz, Bhaskar Mitra, Daniel Campos · arXiv:2405.07767 (SIGIR 2024) · [arxiv.org/abs/2405.07767](https://arxiv.org/abs/2405.07767) — `[STC24]` · owns the fully-synthetic test-collection feasibility result and the LLM-bias risk it identifies in such collections.
+- <a id="src-beir21"></a>*BEIR: A Heterogeneous Benchmark for Zero-shot Evaluation of Information Retrieval Models* — owned by **M4**, surveyed there; cited here only as the instrument the framework guide recommends for detecting post-fine-tuning domain shift [[LI-CWE]](#src-li-cwe) — `[BEIR21]`. This entry is a cross-reference, not a survey: **M4** owns the
   bibliography entry, the author list, and the paper link.
 
 **Unsupported (synthetic, no located source):** the LogiTrack corpus, the 60- and 400-query sets,
@@ -616,7 +632,7 @@ items are deliberately **left unassigned**:
   date a 2024 artifact 2023, the slot is reported empty here.
 - **`RelevancyEvaluator`'s "answer relevance vs context relevance" split is not documented as a
   split.** The class measures whether "the retrieved context and the answer is relevant and
-  consistent for the given query" [LI-EVU] — one result over two variables — while `[RAGAS23]` and
+  consistent for the given query" [[LI-EVU]](#src-li-evu) — one result over two variables — while `[RAGAS23]` and
   `[ARES23]` treat the two as separate dimensions. This module asserts the split must be built
   explicitly in the harness; that is an inference from the class documentation, not a framework
   guarantee.

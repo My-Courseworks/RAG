@@ -22,13 +22,13 @@ Here is how it happened, and note that not one step is a bug:
 
 The vector store's metadata filter was built from the *query's inferred* metadata. Auto-retrieval does
 exactly this: "Given a natural language query, we first use the LLM to infer a set of metadata filters as
-well as the right query string to pass to the vector db (either can also be blank)" [LI-AR]. The
+well as the right query string to pass to the vector db (either can also be blank)" [[LI-AR]](#src-li-ar). The
 inference returned `lane: "Rotterdam–Singapore"` and a query string. It did **not** return a client,
 because "which client's contracts may I read" is not a field the LLM is allowed to decide and was never
 in the filter schema. The filter that was pushed down was a *relevance* filter, and the system treated it
 as an *authorization* filter.
 
-The retriever then behaved perfectly: it found the most similar documents in the shared 480,000-document
+The retriever then behaved perfectly: it found the most similar documents in the shared [480,000-document](../../syllabus.md#corpus-scale)
 index, which is exactly what it is for. The generator behaved perfectly: it synthesized a faithful answer
 from the evidence it was given. The citation machinery behaved perfectly: it pointed at real clauses.
 
@@ -63,9 +63,9 @@ one place where the pipeline asks "may this principal read this node?" and one p
 That place is the **post-retrieval authorization filter**, and the framework gives it an exact slot: node
 postprocessors "take a set of nodes, and apply some kind of transformation or filtering before returning
 them," and they are "most commonly applied within a query engine, **after the node retrieval step and
-before the response synthesis step**" [LI-NP]. The custom-postprocessor interface is deliberately tiny —
+before the response synthesis step**" [[LI-NP]](#src-li-np). The custom-postprocessor interface is deliberately tiny —
 subclass `BaseNodePostprocessor` and implement `_postprocess_nodes(self, nodes, query_bundle)` returning
-`List[NodeWithScore]` [LI-NP] — which is the point: a security control you can write in fifteen lines is a
+`List[NodeWithScore]` [[LI-NP]](#src-li-np) — which is the point: a security control you can write in fifteen lines is a
 security control that will actually be present on every path.
 
 ```mermaid
@@ -126,10 +126,10 @@ this course has been building across M16 and M18:
 | Leak path | Why the backstop misses it | Control |
 |---|---|---|
 | **Semantic response cache** (→ M18) | The cache is keyed on query *semantics*, not on principal. A second user asking a semantically similar question gets the first user's answer and citations with every node already filtered — no retrieval happens, so no backstop runs | Key every cache entry on (tenant, ACL hash). Never share an entry across principals with different ACL sets. On any ACL change, invalidate that principal's entries |
-| **Graph community summaries** (→ M16) | A `PropertyGraphIndex` stores entity and relation nodes, and community summaries are *aggregates over groups of entities* [LI-PG] — the graph structure M16 prices in detail. If entity nodes inherit no ACL and summaries span tenants, the summary is a derived document whose text is the union of what several tenants may read | Propagate ACL to entity/relation nodes at extraction time; forbid cross-ACL community membership; treat every generated summary as a node whose `acl` is the *intersection* of its members' |
+| **Graph community summaries** (→ M16) | A `PropertyGraphIndex` stores entity and relation nodes, and community summaries are *aggregates over groups of entities* [[LI-PG]](#src-li-pg) — the graph structure M16 prices in detail. If entity nodes inherit no ACL and summaries span tenants, the summary is a derived document whose text is the union of what several tenants may read | Propagate ACL to entity/relation nodes at extraction time; forbid cross-ACL community membership; treat every generated summary as a node whose `acl` is the *intersection* of its members' |
 | **Trace and span logs** (→ M19) | Observability stores the retrieved node set, scores, prompts, and responses. That store now contains every tenant's evidence assembled into readable prompts | Tenant-scope the trace store; redact node text at the span boundary; treat traces as a regulated data store with its own retention |
 | **Agentic tool calls** (→ M16) | The loop can call a tool the user's permissions were never checked against. The user is not the principal of that call — the *system* is | Every tool call carries the end-user principal; tools re-authorize rather than inheriting a session credential |
-| **Embedding vectors themselves** | Vectors are computed from text and are not obviously sensitive | See the literature below: inversion attacks recover 50–70% of input words [EMBLEAK20]. Protecting vectors is a real control, not paranoia |
+| **Embedding vectors themselves** | Vectors are computed from text and are not obviously sensitive | See the literature below: inversion attacks recover 50–70% of input words [[EMBLEAK20]](#src-embleak20). Protecting vectors is a real control, not paranoia |
 | **Rebuild / reindex jobs** | A backfill regenerates nodes; a bug in the metadata mapping can drop the `acl` field, and a node with no `acl` field is a node with no owner | Make a missing `acl` a hard ingest failure, never a default-allow |
 
 The cache row is the one that catches teams by surprise, and it is worth stating as its own rule: **a
@@ -139,7 +139,7 @@ presenting it, or keyed so that only principals with identical ACLs can share it
 
 > **LlamaIndex at a glance:** the backstop is a `BaseNodePostprocessor` subclass, and correctness depends
 > entirely on where you attach it. `_postprocess_nodes(nodes, query_bundle)` receives the retrieved
-> `NodeWithScore` list and returns the list it wants the synthesizer to see [LI-NP]. Attach it as a
+> `NodeWithScore` list and returns the list it wants the synthesizer to see [[LI-NP]](#src-li-np). Attach it as a
 > `node_postprocessor` on every query engine that exists in your system — and note that "every query
 > engine" now includes the sub-engines inside a `SubQuestionQueryEngine` and the retrieval tool inside an
 > agent (→ M16), each of which is a separate construction site. **The number of query-engines in your
@@ -162,16 +162,16 @@ LlamaIndex's ingestion pipeline is where the contract is enforced, because it is
 run and where the docstore's document management lives. The pipeline "uses a concept of `Transformations`
 that are applied to input data," each node+transformation pair is cached, and attaching a docstore
 "enable[s] document management" keyed on `doc_id`/`ref_doc_id` with a `doc_id → document_hash` map,
-re-processing and upserting on a hash change and skipping unchanged documents [LI-IP]. Two consequences
+re-processing and upserting on a hash change and skipping unchanged documents [[LI-IP]](#src-li-ip). Two consequences
 for permissions:
 
 1. **An ACL change is a content change.** If the ACL is a node metadata field and the node+transformation
-   pair is cached, then a pure ACL change on unchanged text may not invalidate the cached node [LI-IP].
+   pair is cached, then a pure ACL change on unchanged text may not invalidate the cached node [[LI-IP]](#src-li-ip).
    Removing a user's access must actively re-emit the node with the new ACL — it is not a metadata-only
    update you can assume the cache will notice.
 2. **The pipeline is the right place to fail closed.** A `Transformations` stage that asserts
    `acl ∈ metadata` and raises otherwise turns "a document with no ACL" from a silent default-allow into
-   a failed ingest that someone must fix. The framework composes transformations arbitrarily [LI-IP], so
+   a failed ingest that someone must fix. The framework composes transformations arbitrarily [[LI-IP]](#src-li-ip), so
    this assertion is a few lines; the discipline is making it non-optional in the pipeline factory.
 
 ### Document-level vs span-level permissions
@@ -196,27 +196,39 @@ aspirational span-level permissions is that you believe a boundary is enforced, 
 does not detect it, and the annex ships inside the agreement — a worse outcome than never having claimed
 span-level, because your threat model now has a hole you have decided not to look at.
 
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — the restricted region is often not prose, so the boundary depends on layout parsing.
+> - A client-specific annex can be a rate table or a scanned, stamped page; span-level needs the parser to emit it as its own node (→ [M3](../03-parsing-and-chunking/README.md)).
+> - A scanned page OCR'd to flat text has no headings, so the annex boundary is lost and span-level silently falls back to document-level.
+> - Figure captions and vision-model descriptions are new nodes; give them the ACL of the region they describe, never a default.
+> - Page-image retrieval (e.g. [ColPali](https://arxiv.org/abs/2407.01449)) is deferred ([syllabus §1](../../syllabus.md#1-scope-knobs-frozen)); there the page image itself would carry the ACL.
+
 ### PII redaction before embedding, and what redaction cannot do
 
 The rule is **redact before embedding**, and the reason is not aesthetic. Embedding models have been
 shown to leak their inputs: inversion attacks on popular sentence embeddings "recover between 50%–70% of
 the input words (F1 scores of 0.5–0.7)," sensitive attributes "such as authorship of text can be easily
 extracted by training an inference model on just a handful of labeled embedding vectors," and embedding
-models "leak moderate amount of membership information for infrequent training data inputs" [EMBLEAK20].
+models "leak moderate amount of membership information for infrequent training data inputs" [[EMBLEAK20]](#src-embleak20).
 An embedding is not a privacy-preserving summary of its input; it is a lossy but *invertible* encoding of
 it. Therefore:
 
 - Redacting after embedding is not redaction at all — the information is already in the vector, and
   redaction of the stored *text* leaves the leak in the *vector store*.
 - Redaction must be idempotent and auditable. A redaction transformation inside the `IngestionPipeline`
-  [LI-IP] can be logged and its output stored, so that "was document X ingested redacted?" is a queryable
+  [[LI-IP]](#src-li-ip) can be logged and its output stored, so that "was document X ingested redacted?" is a queryable
   fact rather than a code-reading exercise.
 - Redaction has an irreducible cost: it changes retrieval. A redacted contract embeds differently, and a
   query that named the redacted entity retrieves less well. That cost is paid at ingest and is invisible
   in your eval set unless the eval set contains queries that mention the redacted fields.
 - Redaction does not address the concentration risk: a corpus with one document per person leaks by
-  *membership* even when each document is clean, which is the membership-inference result [EMBLEAK20]
+  *membership* even when each document is clean, which is the membership-inference result [[EMBLEAK20]](#src-embleak20)
   applied at the corpus level.
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — text-only redaction misses PII that lives in pixels.
+> - Names in signatures, stamps, or handwriting enter the index only via OCR or a vision description; redact that text before embedding.
+> - A stored page image kept for citation display still holds the unredacted PII; redact it or do not store it.
+> - A vision-model call sends page images to a provider; it needs the same residency and retention checks as embedding and generation (tables below).
+> - Page images, OCR output, and figure descriptions are derived artifacts; the deletion chain must list them (→ [M14](../14-ingestion-at-scale/README.md)).
 
 > **Tradeoff (the ledger entry M17-2).** *Decision:* redact PII in the `IngestionPipeline` before the
 > embedding transformation, and accept the resulting retrieval-quality loss as an ingest-time cost.
@@ -224,7 +236,7 @@ it. Therefore:
 > cannot recover a redacted span without re-ingesting from source); a parser/NER dependency in the hot
 > ingest path that can itself be wrong in both directions.
 > *Accepted because:* the alternative is a vector store that is a searchable index of exactly the data
-> the regulation protects [EMBLEAK20], and "the embedding is not the data" is a claim the literature does
+> the regulation protects [[EMBLEAK20]](#src-embleak20), and "the embedding is not the data" is a claim the literature does
 > not support. *Reverses if:* the field is present in the source system under a lawful basis that also
 > covers embedding, and the access control on the vector store is demonstrably equivalent to the access
 > control on the source — which is a legal and audit determination, not an engineering one, and it must be
@@ -237,7 +249,7 @@ The engineering content of residency is small and the consequences of getting it
 
 | Control point | What residency constrains | LlamaIndex/K8s lever |
 |---|---|---|
-| Vector + document store region | Where node text and vectors physically live | `StorageContext` with a region-pinned store [LI-ST]; a per-region deployment rather than a per-region filter |
+| Vector + document store region | Where node text and vectors physically live | `StorageContext` with a region-pinned store [[LI-ST]](#src-li-st); a per-region deployment rather than a per-region filter |
 | Embedding call region | Where text is transmitted for embedding | A region-pinned embedding endpoint; provider region selection is a deployment config, not a code branch |
 | Generation call region | Where prompt text (containing retrieved evidence) is transmitted | The same, and this is the one that leaks most often because it is the newest call in the path |
 | Trace/observability region | Where prompts and responses are *retained* | A region-pinned or self-hosted trace backend (→ M19) |
@@ -251,9 +263,9 @@ is not residency compliance; it is residency metadata.
 > **LlamaIndex at a glance:** LlamaIndex's storage layer is swappable by design — the framework supports
 > "swappable **storage components**" for document stores, index stores, vector stores, property graph
 > stores, and chat stores, and it "supports persisting data to any storage backend supported by
-> `fsspec`, with confirmed support for local filesystem, AWS S3, and Cloudflare R2" [LI-ST]. That
+> `fsspec`, with confirmed support for local filesystem, AWS S3, and Cloudflare R2" [[LI-ST]](#src-li-st). That
 > swappability is the residency lever: region-pinned stores are a `StorageContext` configuration
-> [LI-ST], not a rewrite. The same sentence is a warning, though — a store you can swap is a store you
+> [[LI-ST]](#src-li-st), not a rewrite. The same sentence is a warning, though — a store you can swap is a store you
 > can accidentally swap to the default, and "the index silently pointed at a different region's store"
 > is the kind of change that appears in a diff as one line.
 
@@ -511,14 +523,14 @@ finished designing.
   has been implemented correctly," and introducing "a novel metric, called access advantage, to
   empirically evaluate the efficacy of a PermLLM mechanism" built on PEFT and instantiated via "Domain
   Distinguishability Index (DDI) based on Membership Inference Attacks" and "Utility Gap Index (UGI)
-  based on LLM utility evaluation" [PERMLLM25]. This module argues the opposite: authorization runs
+  based on LLM utility evaluation" [[PERMLLM25]](#src-permllm25). This module argues the opposite: authorization runs
   after retrieval, in the system, and is never delegated to the model. **What to change:** the two
   positions are not as opposed as they look, and the honest reading is that they solve different
   problems. Model-level enforcement aims at a *fine-tuned model over siloed data* — a scenario where
   retrieval is not in the loop at all — whereas this module assumes a shared index where the evidence is
   retrieved per request. If your architecture has *both* a fine-tuned model and retrieval, you need
   model-level enforcement **and** the backstop, and neither paper nor this module provides evidence that
-  either alone is sufficient. What is not defensible is reading [PERMLLM25] as a substitute for the
+  either alone is sufficient. What is not defensible is reading [[PERMLLM25]](#src-permllm25) as a substitute for the
   post-retrieval check: the paper's own evaluation instrument (DDI via membership inference) is a
   statistical measure over public datasets, not a per-request deny decision with an audit record, and an
   audit is what a regulator asks for.
@@ -527,7 +539,7 @@ finished designing.
   input data," with inversion recovering "between 50%–70% of the input words," attribute inference working
   from "just a handful of labeled embedding vectors," and "moderate amount of membership information"
   leaking for infrequent training inputs — while the paper's own proposed defenses "prevent the leakage to
-  some extent **at a minor cost in utility**" [EMBLEAK20]. Read the qualifier: *to some extent*, at a
+  some extent **at a minor cost in utility**" [[EMBLEAK20]](#src-embleak20). Read the qualifier: *to some extent*, at a
   cost. **What to change:** do not treat "we redacted" as the end of the argument. The controls that
   survive this finding are structural (the vector store's own access control, tenancy-scoped stores,
   not storing vectors you do not need) rather than redaction-based, and the residual leakage should be
@@ -535,17 +547,17 @@ finished designing.
 - **"Automate the ACL so it stays correct."** Using retrieval to generate access-control policy from
   requirement documents is an active research direction, and the reported numbers are real: an
   access-requirement extraction F1 of 87.9%, policy translation F1 of 77.9%, improved by 3% to 80.6%
-  through "a novel verification-refinement mechanism" [RAGENT24]. Now read them as a safety argument:
+  through "a novel verification-refinement mechanism" [[RAGENT24]](#src-ragent24). Now read them as a safety argument:
   an 80.6% F1 policy translator means roughly one in five generated policies is partly wrong, and a wrong
   policy is either a breach (over-permission) or an outage (under-permission). **What to change:** treat
   automated policy generation as a *drafting aid with a human approver*, never as the control plane. The
   paper's own framing supports this — it identifies "the complexities and ambiguities of these
-  specifications" as the source of the errors it is trying to reduce [RAGENT24] — but the number it
+  specifications" as the source of the errors it is trying to reduce [[RAGENT24]](#src-ragent24) — but the number it
   reports is not a number you can ship behind a `strict=True` flag.
 - **"Injection is a security module, so it belongs in the security module."** Indirect prompt injection
   via retrieved content — planting prompts into data likely to be retrieved, which the attack authors
   show "blur[s] the line between data and instructions" and enables adversaries to "remotely (without a
-  direct interface) exploit LLM-integrated applications" [INJECT23] — is owned by **M21** and is cited
+  direct interface) exploit LLM-integrated applications" [[INJECT23]](#src-inject23) — is owned by **M21** and is cited
   here only for the boundary it creates, not surveyed. The boundary is this: an injected instruction can
   itself induce an over-broad retrieval or a tool call, which means injection and scope leak can be the
   same incident. **What to change:** do not treat the backstop as a defence against injection. The
@@ -557,15 +569,15 @@ finished designing.
 
 ## Sources
 
-- [Node Postprocessor](https://developers.llamaindex.ai/python/framework/module_guides/querying/node_postprocessors/) — `[LI-NP]` · owns the postprocessor slot and its placement ("after the node retrieval step and before the response synthesis step"), `BaseNodePostprocessor`, and the `_postprocess_nodes(nodes, query_bundle)` interface that the authorization backstop implements.
-- [Ingestion Pipeline](https://developers.llamaindex.ai/python/framework/module_guides/loading/ingestion_pipeline/) — `[LI-IP]` · owns the `Transformations` model, the per-node+transformation cache, and docstore-backed document management with `doc_id`/`ref_doc_id` and the `doc_id → document_hash` map.
-- [Storing](https://developers.llamaindex.ai/python/framework/module_guides/storing/) — `[LI-ST]` · owns the swappable storage components (document, index, vector, property graph, chat stores), the `fsspec`-based backend support, and `StorageContext` as the configuration point for region-pinned stores.
-- [Auto-Retrieval from a Vector Database](https://developers.llamaindex.ai/python/framework/integrations/vector_stores/elasticsearch_auto_retriever/) — `[LI-AR]` · owns `VectorIndexAutoRetriever` with `VectorStoreInfo`/`MetadataInfo`, and the fact that the LLM infers metadata filters from the natural-language query — the mechanism that must never be the authorization mechanism.
-- [Using a Property Graph Index](https://developers.llamaindex.ai/python/framework/module_guides/indexing/lpg_index_guide/) — `[LI-PG]` · owns the property-graph structure — labeled entity nodes, `Relation` objects, and the graph stores that hold them — which is what makes a community-style summary an aggregate across whatever nodes it was built from. The extraction-cost and quality discussion of this structure is M16's.
-- *Information Leakage in Embedding Models* — Congzheng Song, Ananth Raghunathan · arXiv:2004.00053 (v2, 2020) · [arxiv.org/abs/2004.00053](https://arxiv.org/abs/2004.00053) — `[EMBLEAK20]` · owns embedding inversion (50–70% of input words recovered), attribute inference from few labeled vectors, membership leakage, and the utility cost of the proposed defenses.
-- *Permissioned LLMs: Enforcing Access Control in Large Language Models* — Bargav Jayaraman, Virendra J. Marathe, Hamid Mozaffari, William F. Shen, Krishnaram Kenthapadi · arXiv:2505.22860 (v2, 2025) · [arxiv.org/abs/2505.22860](https://arxiv.org/abs/2505.22860) — `[PERMLLM25]` · owns the model-level (PEFT-based) access-control position, the "relevant response" formalism, the `access advantage` metric, and the DDI/UGI instantiations.
-- *RAGent: Retrieval-based Access Control Policy Generation* — Sakuna Harinda Jayasundara, Nalin Asanka Gamagedara Arachchilage, Giovanni Russello · arXiv:2409.07489 (v2, 2024) · [arxiv.org/abs/2409.07489](https://arxiv.org/abs/2409.07489) — `[RAGENT24]` · owns the reported accuracy of automated access-control policy generation (87.9% requirement F1, 77.9% → 80.6% policy F1), which bounds how much of the control plane can be automated.
-- *Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection* — Kai Greshake, Sahar Abdelnabi, Shailesh Mishra, Christoph Endres, Thorsten Holz, Mario Fritz · arXiv:2302.12173 (v2, 2023) · [arxiv.org/abs/2302.12173](https://arxiv.org/abs/2302.12173) — `[INJECT23]` · owns the indirect-injection attack surface on LLM-integrated applications; **M21** owns the survey of defences, and this entry is mirrored for local self-containment. · **M21** owns the survey of injection defences.
+- <a id="src-li-np"></a>[Node Postprocessor](https://developers.llamaindex.ai/python/framework/module_guides/querying/node_postprocessors/) — `[LI-NP]` · owns the postprocessor slot and its placement ("after the node retrieval step and before the response synthesis step"), `BaseNodePostprocessor`, and the `_postprocess_nodes(nodes, query_bundle)` interface that the authorization backstop implements.
+- <a id="src-li-ip"></a>[Ingestion Pipeline](https://developers.llamaindex.ai/python/framework/module_guides/loading/ingestion_pipeline/) — `[LI-IP]` · owns the `Transformations` model, the per-node+transformation cache, and docstore-backed document management with `doc_id`/`ref_doc_id` and the `doc_id → document_hash` map.
+- <a id="src-li-st"></a>[Storing](https://developers.llamaindex.ai/python/framework/module_guides/storing/) — `[LI-ST]` · owns the swappable storage components (document, index, vector, property graph, chat stores), the `fsspec`-based backend support, and `StorageContext` as the configuration point for region-pinned stores.
+- <a id="src-li-ar"></a>[Auto-Retrieval from a Vector Database](https://developers.llamaindex.ai/python/framework/integrations/vector_stores/elasticsearch_auto_retriever/) — `[LI-AR]` · owns `VectorIndexAutoRetriever` with `VectorStoreInfo`/`MetadataInfo`, and the fact that the LLM infers metadata filters from the natural-language query — the mechanism that must never be the authorization mechanism.
+- <a id="src-li-pg"></a>[Using a Property Graph Index](https://developers.llamaindex.ai/python/framework/module_guides/indexing/lpg_index_guide/) — `[LI-PG]` · owns the property-graph structure — labeled entity nodes, `Relation` objects, and the graph stores that hold them — which is what makes a community-style summary an aggregate across whatever nodes it was built from. The extraction-cost and quality discussion of this structure is M16's.
+- <a id="src-embleak20"></a>*Information Leakage in Embedding Models* — Congzheng Song, Ananth Raghunathan · arXiv:2004.00053 (v2, 2020) · [arxiv.org/abs/2004.00053](https://arxiv.org/abs/2004.00053) — `[EMBLEAK20]` · owns embedding inversion (50–70% of input words recovered), attribute inference from few labeled vectors, membership leakage, and the utility cost of the proposed defenses.
+- <a id="src-permllm25"></a>*Permissioned LLMs: Enforcing Access Control in Large Language Models* — Bargav Jayaraman, Virendra J. Marathe, Hamid Mozaffari, William F. Shen, Krishnaram Kenthapadi · arXiv:2505.22860 (v2, 2025) · [arxiv.org/abs/2505.22860](https://arxiv.org/abs/2505.22860) — `[PERMLLM25]` · owns the model-level (PEFT-based) access-control position, the "relevant response" formalism, the `access advantage` metric, and the DDI/UGI instantiations.
+- <a id="src-ragent24"></a>*RAGent: Retrieval-based Access Control Policy Generation* — Sakuna Harinda Jayasundara, Nalin Asanka Gamagedara Arachchilage, Giovanni Russello · arXiv:2409.07489 (v2, 2024) · [arxiv.org/abs/2409.07489](https://arxiv.org/abs/2409.07489) — `[RAGENT24]` · owns the reported accuracy of automated access-control policy generation (87.9% requirement F1, 77.9% → 80.6% policy F1), which bounds how much of the control plane can be automated.
+- <a id="src-inject23"></a>*Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection* — Kai Greshake, Sahar Abdelnabi, Shailesh Mishra, Christoph Endres, Thorsten Holz, Mario Fritz · arXiv:2302.12173 (v2, 2023) · [arxiv.org/abs/2302.12173](https://arxiv.org/abs/2302.12173) — `[INJECT23]` · owns the indirect-injection attack surface on LLM-integrated applications; **M21** owns the survey of defences, and this entry is mirrored for local self-containment. · **M21** owns the survey of injection defences.
 
 **Unsupported (synthetic, no located source):** the LogiTrack incident in the opening scene, the Nordwind
 and Baltic Freight Partners client names, the 480,000-document shared index, the 12-clients × 40-jurisdictions
@@ -574,7 +586,7 @@ entries. These are constructed for teaching and are not empirical findings. The 
 stored authorization verdict" is an architectural argument developed here from M18's cache design, not a
 result measured in this module. The claim that an ACL-only change may not invalidate a cached
 node+transformation pair follows from the documented cache key being the node+transformation pair
-[LI-IP]; it is an inference from the documented mechanism, not a documented statement about ACL updates.
+[[LI-IP]](#src-li-ip); it is an inference from the documented mechanism, not a documented statement about ACL updates.
 The claim that ANN tombstones may leave vectors physically present is stated as a question to ask of your
 store rather than as a property of any named store — no store's deletion semantics are verified here. The
 residency control table is a design checklist; no provider's retention, subprocessor, or zero-retention

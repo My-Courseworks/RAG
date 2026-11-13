@@ -53,9 +53,9 @@ The framework treats this as a first-class stage with a precise definition: "Que
 are modules that will convert a query into another query. They can be **single-step**, as in the
 transformation is run once before the query is executed against an index. They can also be
 **multi-step**, as in: (1) The query is transformed, executed against an index, (2) The response is
-retrieved, (3) Subsequent queries are transformed/executed in a sequential fashion." [LI-QT]
+retrieved, (3) Subsequent queries are transformed/executed in a sequential fashion." [[LI-QT]](#src-li-qt)
 
-The documented use cases map one-to-one onto the opening scene's four problems [LI-QT]:
+The documented use cases map one-to-one onto the opening scene's four problems [[LI-QT]](#src-li-qt):
 
 | Use case (documented) | Opening-scene problem it addresses | Technique |
 |---|---|---|
@@ -102,7 +102,7 @@ optimization; it is the requester for the indexes M8 built.
 
 > **LlamaIndex at a glance:** `TransformQueryEngine(query_engine, query_transform=hyde)` wraps any
 > query engine so that the transform runs before retrieval, and `HyDEQueryTransform(include_original=True)`
-> is the documented transform [LI-QT]. `include_original` is the parameter that decides whether the
+> is the documented transform [[LI-QT]](#src-li-qt). `include_original` is the parameter that decides whether the
 > transformed query *replaces* the user's or is *added to it* — and that is a real decision, because
 > HyDE's generated document is a guess that can be confidently wrong.
 
@@ -131,7 +131,7 @@ user questions", doing three things in sequence: "detect whether a given questio
 generate an appropriate clarifying question to ask the user, and give a final answer after
 receiving clarification." They also solve the evaluation problem the same way M13 will: "we can
 simulate users by providing language models with privileged information. This lets us
-automatically evaluate multi-turn clarification dialogues." [CLAM22]
+automatically evaluate multi-turn clarification dialogues." [[CLAM22]](#src-clam22)
 
 Two properties of that finding should shape the decision, and neither is about accuracy.
 
@@ -144,14 +144,14 @@ decision this course asks you to sign off on.
 **Clarification is the only technique in M10 whose cost is paid by the user, not the system.** Every
 other in this module spends tokens and milliseconds. Clarification spends a *turn*, and a turn is
 the most expensive resource in the pipeline because it can end the interaction. That asymmetry is
-why CLAM frames it as "selective" [CLAM22] and why the alternative — guess, but state the guess —
+why CLAM frames it as "selective" [[CLAM22]](#src-clam22) and why the alternative — guess, but state the guess —
 deserves equal standing in your ADR.
 
 For LogiTrack, the guessed version of the opening scene writes something like: *"Assuming UN3480
 (lithium-ion, standalone, ≤30% state of charge): Singapore requires X. If you meant UN3090
 (lithium-metal), the requirement is different — say which and I'll re-run."* That is a defensible
 *two-in-one* answer: it answers, it exposes the assumption, and it does not spend a turn. It is also
-strictly more work to build, because it needs the ambiguity detection CLAM describes [CLAM22] plus a
+strictly more work to build, because it needs the ambiguity detection CLAM describes [[CLAM22]](#src-clam22) plus a
 branch structure in the generation prompt — which makes it an M11 problem as much as an M10 one.
 
 > **Tradeoff (the ledger entry M10-2).** *Decision:* guess the disambiguation and state the guess
@@ -177,11 +177,11 @@ the difficulty of zero-shot learning and encoding relevance." Their pivot: "Give
 first zero-shot instructs an instruction-following language model (e.g. InstructGPT) to generate a
 hypothetical document. The document captures relevance patterns but is unreal and may contain false
 details. Then, an unsupervised contrastively learned encoder (e.g. Contriever) encodes the document
-into an embedding vector." [HYDE22]
+into an embedding vector." [[HYDE22]](#src-hyde22)
 
 The two-step structure is the whole idea, and the second step is the one that makes it safe: "This
 second step ground the generated document to the actual corpus, with the encoder's dense bottleneck
-filtering out the incorrect details." [HYDE22] A hallucinated *pas sage* is full of wrong specifics;
+filtering out the incorrect details." [[HYDE22]](#src-hyde22) A hallucinated *pas sage* is full of wrong specifics;
 but the *embedding* of a passage that talks about lithium battery packaging instructions, in the
 corpus's register, with the corpus's vocabulary, lands much nearer the corpus's real DG chunks than
 an embedded seven-word text message does. The wrong details are exactly the kind of information a
@@ -189,17 +189,23 @@ fixed-size vector discards (→ M4's compression argument).
 
 The reported result: HyDE "significantly outperforms the state-of-the-art unsupervised dense
 retriever Contriever and shows strong performance comparable to fine-tuned retrievers, across
-various tasks (e.g. web search, QA, fact verification) and languages" [HYDE22]. Read the scope
+various tasks (e.g. web search, QA, fact verification) and languages" [[HYDE22]](#src-hyde22). Read the scope
 carefully: the comparison is against an **unsupervised** dense retriever — a low bar — and the
 achievement is *parity* with fine-tuned retrievers, not superiority over them. M15 owns the
 fine-tuning alternative; HyDE is the zero-labels path to the same place, and it is cheaper *if* your
 query volume is low and your corpus vocabulary is learnable from a prompt.
 
 The framework's version is `HyDEQueryTransform(include_original=True)` wrapped by
-`TransformQueryEngine` [LI-QT]. `include_original=True` retains the user's own query alongside the
+`TransformQueryEngine` [[LI-QT]](#src-li-qt). `include_original=True` retains the user's own query alongside the
 hypothetical document, which is the right default here for the same reason M9's diversity argument
 is right: you do not know which of the two representations is better for a given query, so retrieve
 on both rather than betting on one.
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — the "corpus register" a rewrite or HyDE passage imitates is whatever text ingestion produced.
+> - Rate tables land as table text (→ [M3](../03-parsing-and-chunking/README.md)); a prose HyDE passage can sit far from a table chunk.
+> - Figures and stamps exist only as captions or vision-model descriptions; rewrites should aim at that wording.
+> - OCR slips (e.g. `UN348O` for `UN3480`) break exact-code rewrites; keep a dense or fuzzy path alongside.
+> - Report rewrite/HyDE gains per content type, not only per defect stratum (→ [M13](../13-evaluation/README.md)).
 
 ### Multi-query expansion and RAG-Fusion
 
@@ -209,12 +215,12 @@ retriever's result list. Rackauckas evaluated it on a real industrial corpus: "I
 identified a need for engineers, account managers, and customers to rapidly obtain product
 information … I evaluated the use of the newly popularized RAG-Fusion method. RAG-Fusion combines
 RAG and reciprocal rank fusion (RRF) by generating multiple queries, reranking them with reciprocal
-scores and fusing the documents and scores." [RAGFUS23]
+scores and fusing the documents and scores." [[RAGFUS23]](#src-ragfus23)
 
 The finding is a genuinely honest one, and it names both the benefit and the failure: "I found that
 RAG-Fusion was able to provide accurate and comprehensive answers due to the generated queries
 contextualizing the original query from various perspectives. **However, some answers strayed off
-topic when the generated queries' relevance to the original query is insufficient.**" [RAGFUS23]
+topic when the generated queries' relevance to the original query is insufficient.**" [[RAGFUS23]](#src-ragfus23)
 
 That "however" is the safety property of every expansion technique in this module. Expansion adds
 candidate-signal and adds drift in the same operation, and the drift is undetectable downstream
@@ -236,10 +242,10 @@ Decomposition is the technique the opening scene needs most, because "can I ship
 
 The framework's multi-document engine is documented as follows: "Given a query, this query engine
 will generate a 'query plan' containing sub-queries against sub-documents before synthesizing the
-final answer", constructed as `SubQuestionQueryEngine.from_defaults(query_engine_tools=[...])` [LI-QA].
+final answer", constructed as `SubQuestionQueryEngine.from_defaults(query_engine_tools=[...])` [[LI-QA]](#src-li-qa).
 The example notebook adds the mechanism: "It first breaks down the complex query into sub questions
 for each relevant data source, then gather all the intermediate reponses and synthesizes a final
-response." [LI-SQ]
+response." [[LI-SQ]](#src-li-sq)
 
 The example's own trace is the most useful artifact in this module, because it puts a real number on
 the multiplication. The query *"How was Paul Grahams life different before, during, and after YC?"*
@@ -252,7 +258,7 @@ Generated 3 sub questions.
 [pg_essay] Q: What did Paul Graham work on after YC?
 ```
 
-and its debug trace, verbatim [LI-SQ]:
+and its debug trace, verbatim [[LI-SQ]](#src-li-sq):
 
 | Event | Time |
 |---|---|
@@ -284,7 +290,7 @@ query transformations are a generalization on top of existing single-step query 
 approaches. Given an initial, complex query, the query is transformed and executed against an index.
 The response is retrieved from the query. Given the response (along with prior responses) and the
 query, follow-up questions may be asked against the index as well. This technique allows a query to
-be run against a single knowledge source until that query has satisfied all questions." [LI-QT]
+be run against a single knowledge source until that query has satisfied all questions." [[LI-QT]](#src-li-qt)
 
 The construction is `MultiStepQueryEngine(query_engine, query_transform=StepDecomposeQueryTransform(llm,
 verbose=True))` [LI-QT]. The distinction from `SubQuestionQueryEngine` is a **data dependency**, and
@@ -292,8 +298,8 @@ it matters:
 
 | Engine | Sub-questions | Depends on | Use when |
 |---|---|---|---|
-| `SubQuestionQueryEngine` | generated **in parallel** from the original query, one per data source [LI-QA, LI-SQ] | nothing | the parts are independent ("before / during / after") |
-| `MultiStepQueryEngine` | generated **sequentially**, each conditioned on prior answers [LI-QT] | previous answers | the next question depends on what the last one found ("which carrier? … and what does *that* carrier's clause say?") |
+| `SubQuestionQueryEngine` | generated **in parallel** from the original query, one per data source [[LI-QA](#src-li-qa), [LI-SQ](#src-li-sq)] | nothing | the parts are independent ("before / during / after") |
+| `MultiStepQueryEngine` | generated **sequentially**, each conditioned on prior answers [[LI-QT]](#src-li-qt) | previous answers | the next question depends on what the last one found ("which carrier? … and what does *that* carrier's clause say?") |
 
 The opening scene needs the second. "Is UN3480 permitted to Singapore?" is answerable in parallel
 with "what documentation does Singapore require?" — but M8's opening scene, "…see §4.1 of the
@@ -306,7 +312,7 @@ For the multi-hop case, the paper that owns the evidence-path formulation matter
 Ho, Nguyen, Sugawara & Aizawa built 2WikiMultiHopQA because "previous studies revealed that many
 examples in existing multi-hop datasets do not require multi-hop reasoning to answer a question",
 and their dataset "introduce[s] the evidence information containing a reasoning path for multi-hop
-questions" [MULTIHOP20]. If your decomposition evaluation has no evidence paths, you are measuring
+questions" [[MULTIHOP20]](#src-multihop20). If your decomposition evaluation has no evidence paths, you are measuring
 whether the answer string matched, not whether the decomposition worked.
 
 ### The prompting side: three decomposition strategies and their differences
@@ -322,7 +328,7 @@ while more powerful models memorize and recall more factual knowledge, they show
 improvement in their ability to perform this kind of compositional reasoning." Their method: "the
 model explicitly asks itself (and answers) follow-up questions before answering the initial
 question", and crucially, "self-ask's structured prompting lets us easily plug in a search engine to
-answer the follow-up questions" [SELFASK22]. That last property is why self-ask is the natural
+answer the follow-up questions" [[SELFASK22]](#src-selfask22). That last property is why self-ask is the natural
 prompt shape for a decomposition *engine*: its output is a sequence of sub-questions with answer
 slots, which is exactly what a retrieval loop needs.
 
@@ -332,7 +338,7 @@ simpler sub-tasks that can be delegated to a library of prompting-based LLMs ded
 sub-tasks. This modular structure allows each prompt to be optimized for its specific sub-task,
 further decomposed if necessary, and even easily replaced with more effective prompts, trained
 models, or symbolic functions if desired." Critically for this course, "on open-domain multi-hop QA,
-we can incorporate a symbolic information retrieval within our decomposition framework" [DECOMP22].
+we can incorporate a symbolic information retrieval within our decomposition framework" [[DECOMP22]](#src-decomp22).
 That is the division of labour M10 should adopt: **the LLM decomposes, the retriever retrieves, and
 the LLM never fabricates a fact the retriever could have supplied.** A decomposition prompt that
 answers its own sub-questions is not retrieval-augmented; it is chain-of-thought with extra steps.
@@ -342,11 +348,11 @@ decomposition: "a simple prompting technique that enables LLMs to do abstraction
 high-level concepts and first principles from instances containing specific details. Using the
 concepts and principles to guide reasoning, LLMs significantly improve their abilities in following
 a correct reasoning path towards the solution." Reported gains include MMLU Physics +7% and
-Chemistry +11%, TimeQA +27%, and MuSiQue +7% [STEPBACK23].
+Chemistry +11%, TimeQA +27%, and MuSiQue +7% [[STEPBACK23]](#src-stepback23).
 
 Step-back is the most useful of the three for LogiTrack-and is also the one with **no documented
-framework primitive**. `StepDecomposeQueryTransform` exists for decomposition [LI-QT], and
-`HyDEQueryTransform` exists for expansion [LI-QT], but a search of the framework documentation for a
+framework primitive**. `StepDecomposeQueryTransform` exists for decomposition [[LI-QT]](#src-li-qt), and
+`HyDEQueryTransform` exists for expansion [[LI-QT]](#src-li-qt), but a search of the framework documentation for a
 step-back transform returns nothing. **This is a thin-documentation finding, stated plainly:** step-back
 is implementable as a custom query transform or as a prompt-prefix instruction, and the framework's
 `TransformComponent`-style abstraction accommodates it, but the module cannot point at a verified
@@ -365,7 +371,7 @@ put the choices as a text dump into a prompt and use LLM text completion endpoin
 while "Pydantic selectors pass choices as Pydantic schemas into a function calling endpoint, and
 return Pydantic objects." Single vs multi variants exist for both — `LLMSingleSelector` /
 `LLMMultiSelector` and `PydanticSingleSelector` / `PydanticMultiSelector`. A selector can also be
-used standalone, against "a list of `ToolMetadata` or as a list of strings" [LI-ROUTER].
+used standalone, against "a list of `ToolMetadata` or as a list of strings" [[LI-ROUTER]](#src-li-router).
 
 The single-vs-multi choice is the one that matters architecturally:
 
@@ -382,11 +388,17 @@ has no correct answer to give.
 Two further documented details are worth knowing before you build one. There is
 `ToolRetrieverRouterQueryEngine` for "retrieval-augmented routing – this is the case where the set
 of choices themselves may be very big and may need to be indexed", flagged in the docs as "a beta
-feature" [LI-ROUTER] — which is the design you need if routing is over 40 jurisdictions × 12 clients
+feature" [[LI-ROUTER]](#src-li-router) — which is the design you need if routing is over 40 jurisdictions × 12 clients
 rather than over 3 index structures. And the choices are described by *text descriptions* the LLM
 reads, so **the router's accuracy is a function of how well you wrote the tool descriptions**, not of
 the retrieval underneath. Treat a router's descriptions as production prompt text with an owner and
 a test, not as a docstring.
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — the router must know what form each index holds.
+> - Name the content type in each tool description: "rate tables as SQL rows", "DG rules as text with cross-refs".
+> - Rate questions belong on Text-to-SQL, not on a vector index of flattened table text (→ [M8](../08-index-structures-beyond-flat/README.md)).
+> - A photo of a package label as the query: turn it into text (the UN number) first, then rewrite and route.
+> - Retrieving with the image itself (image embeddings, page-image retrieval) is deferred (→ [syllabus §1](../../syllabus.md#1-scope-knobs-frozen)).
 
 The alternative to LLM routing is a **classifier**. Jeong, Baek, Cho, Hwang & Park show the shape:
 "we propose a novel adaptive QA framework, that can dynamically select the most suitable strategy for
@@ -394,16 +406,16 @@ The alternative to LLM routing is a **classifier**. Jeong, Baek, Cho, Hwang & Pa
 complexity. Also, this selection process is operationalized with a classifier, which is a smaller LM
 trained to predict the complexity level of incoming queries with automatically collected labels" —
 adapting among "iterative and single-step retrieval-augmented LLMs, as well as the no-retrieval
-methods" [ADAPTIVE24]. **M16 surveys the broader adaptive/self-correcting family**; M10's claim is
+methods" [[ADAPTIVE24]](#src-adaptive24). **M16 surveys the broader adaptive/self-correcting family**; M10's claim is
 narrower and cheaper: a small trained classifier that picks a *path* is a legitimate alternative to
 an LLM that picks a path in a prompt, and it moves the routing decision off the critical path's
 generation budget entirely.
 
 > **LlamaIndex at a glance:** `RouterQueryEngine(selector=PydanticSingleSelector.from_defaults(),
 > query_engine_tools=[list_tool, vector_tool])` — a router over query engines, with each tool carrying
-> the description the selector reads [LI-ROUTER]. `RouterQueryEngine.from_defaults(query_engine_tools=[...])`
+> the description the selector reads [[LI-ROUTER]](#src-li-router). `RouterQueryEngine.from_defaults(query_engine_tools=[...])`
 > with no explicit selector "uses a `LLMSingleSelector` as the router, which uses the LLM to choose
-> the best sub-index to router the query to, given the descriptions" [LI-QA]. Note the default: an
+> the best sub-index to router the query to, given the descriptions" [[LI-QA]](#src-li-qa). Note the default: an
 > unconfigured router is single-select, so the multi-authority question in the opening scene gets one
 > authority's answer by construction unless you change it.
 
@@ -498,7 +510,7 @@ defect strata if you have none. Deliver a priced decision, not a technique compa
 4. **Choose the expansion count and the drift guard.** If you expand (multi-query, RAG-Fusion), state
    how many variants, and how you detect that a generated variant has drifted off the original
    question — because Rackauckas' own finding is that "some answers strayed off topic when the
-   generated queries' relevance to the original query is insufficient" [RAGFUS23]. A guard is a
+   generated queries' relevance to the original query is insufficient" [[RAGFUS23]](#src-ragfus23). A guard is a
    gate, and a gate is a threshold.
 5. **Choose the selector type and write the descriptions.** Single or multi selector, LLM or trained
    classifier, and the tool descriptions the selector reads. Then state what happens when the router
@@ -525,15 +537,15 @@ you can choose.
 
 - **"Decomposition is the answer to hard retrieval."** This module presents one-shot and multi-step
   decomposition as the primary repair for multi-part and multi-hop queries, on the strength of
-  `SubQuestionQueryEngine`'s parallel-query-plan design [LI-QA, LI-SQ] and self-ask's finding that
+  `SubQuestionQueryEngine`'s parallel-query-plan design [[LI-QA](#src-li-qa), [LI-SQ](#src-li-sq)] and self-ask's finding that
   "the model explicitly asks itself (and answers) follow-up questions before answering the initial
   question" and that "self-ask's structured prompting lets us easily plug in a search engine to
-  answer the follow-up questions, which additionally improves accuracy" [SELFASK22]. Press et al. also
+  answer the follow-up questions, which additionally improves accuracy" [[SELFASK22]](#src-selfask22). Press et al. also
   supply the result that should temper the claim: "as model size increases we show that the single-hop
   question answering performance improves faster than the multi-hop performance does, therefore the
   compositionality gap does not decrease. This surprising result suggests that while more powerful
   models memorize and recall more factual knowledge, they show no corresponding improvement in their
-  ability to perform this kind of compositional reasoning." [SELFASK22] **What to change:** a bigger
+  ability to perform this kind of compositional reasoning." [[SELFASK22]](#src-selfask22) **What to change:** a bigger
   generator does not shrink your decomposition problem — the gap is structural, which is why the
   repair must be an *engine* (a query plan, a retrieval loop) and not a better prompt to a better
   model. But note the corollary the same paper implies: if compositional reasoning does not improve
@@ -542,20 +554,20 @@ you can choose.
   synthesis stage (→ M11) rather than closing it.
 - **"Expansion improves retrieval."** Rackauckas reports that RAG-Fusion "was able to provide accurate
   and comprehensive answers due to the generated queries contextualizing the original query from
-  various perspectives" [RAGFUS23], which is the claim every expansion technique makes. The same
+  various perspectives" [[RAGFUS23]](#src-ragfus23), which is the claim every expansion technique makes. The same
   paper supplies its own refutation in the next clause: "some answers strayed off topic when the
-  generated queries' relevance to the original query is insufficient" [RAGFUS23]. HyDE has the same
+  generated queries' relevance to the original query is insufficient" [[RAGFUS23]](#src-ragfus23). HyDE has the same
   structure from the other side — its own authors describe the hypothetical document as one that
-  "captures relevance patterns but is unreal and may contain false details" [HYDE22], and the
+  "captures relevance patterns but is unreal and may contain false details" [[HYDE22]](#src-hyde22), and the
   corrective mechanism they rely on ("the encoder's dense bottleneck filtering out the incorrect
-  details" [HYDE22]) is a *hoped-for* property of a fixed-size vector, not a measured guarantee.
+  details" [[HYDE22]](#src-hyde22)) is a *hoped-for* property of a fixed-size vector, not a measured guarantee.
   **What to change:** report expansion results as a distribution over query strata, never as a mean.
   The mean of "helped several queries, hurt several others" is a number that describes no query you
   will ever serve.
 - **"Ambiguity should be detected and clarified."** CLAM shows the failure and the fix: "current
   language models rarely ask users to clarify ambiguous questions and instead provide incorrect
   answers", and their prompting framework "significantly improves language models' accuracy on mixed
-  ambiguous and unambiguous questions relative to SotA" [CLAM22]. The disagreement is not with the
+  ambiguous and unambiguous questions relative to SotA" [[CLAM22]](#src-clam22). The disagreement is not with the
   finding but with its generality as *product* advice. CLAM's framing is explicitly **selective**
   clarification, and the paper does not measure the cost it imposes on the unambiguous majority. A
   system that asks on every flagged query optimizes the metric CLAM measures (accuracy on mixed sets)
@@ -567,43 +579,43 @@ you can choose.
   it.
 - **Thin documentation, stated plainly.** There is no documented step-back query-transform class in
   the framework: `StepDecomposeQueryTransform` and `HyDEQueryTransform` exist and are documented
-  [LI-QT], and a documentation search for a step-back transform returns nothing. Step-back prompting
-  is therefore presented here from its paper [STEPBACK23] with **no verified framework primitive**,
+  [[LI-QT]](#src-li-qt), and a documentation search for a step-back transform returns nothing. Step-back prompting
+  is therefore presented here from its paper [[STEPBACK23]](#src-stepback23) with **no verified framework primitive**,
   and any implementation is custom. This module does not invent a class name for it.
 - **Ownership note.** HyDE and query rewriting/decomposition are **M10's** claims course-wide; M16
   cites them by key and does not re-survey them. Reciprocal rank fusion and `QueryFusionRetriever` are
   **M7's**. The adaptive/self-correcting retrieval family, GraphRAG, and agentic retrieval loops are
-  **M16's**; this module cites `Adaptive-RAG`'s classifier shape [ADAPTIVE24] and stops at the routing
+  **M16's**; this module cites `Adaptive-RAG`'s classifier shape [[ADAPTIVE24]](#src-adaptive24) and stops at the routing
   decision.
 
 ---
 
 ## Sources
 
-- [Query Transformations](https://developers.llamaindex.ai/python/framework/optimizing/advanced_retrieval/query_transformations/) — `[LI-QT]` · owns the single-step/multi-step distinction, the three documented use cases, `HyDEQueryTransform`, `TransformQueryEngine`, `StepDecomposeQueryTransform`, and `MultiStepQueryEngine`.
-- [Routers](https://developers.llamaindex.ai/python/framework/module_guides/querying/router/) — `[LI-ROUTER]` · owns `RouterQueryEngine`, `RouterRetriever`, the LLM-vs-Pydantic selector distinction, single vs multi selectors, standalone selector use, and the beta `ToolRetrieverRouterQueryEngine`.
-- [Q&A patterns](https://developers.llamaindex.ai/python/framework/understanding/putting_it_all_together/q_and_a/) — `[LI-QA]` · owns the `SubQuestionQueryEngine` query-plan description, the multi-step query framing, `DecomposeQueryTransform`, and the fact that `RouterQueryEngine.from_defaults` defaults to `LLMSingleSelector`.
-- [Sub Question Query Engine](https://developers.llamaindex.ai/python/examples/query_engine/sub_question_query_engine/) — `[LI-SQ]` · owns the break-down-then-synthesize mechanism, the "Generated 3 sub questions" behaviour, the `CBEventType.SUB_QUESTION` trace structure, and the 66.49 s timing breakdown.
-- *Precise Zero-Shot Dense Retrieval without Relevance Labels* — Luyu Gao, Xueguang Ma, Jimmy Lin, Jamie Callan · arXiv:2212.10496 (2022) · [arxiv.org/abs/2212.10496](https://arxiv.org/abs/2212.10496) — `[HYDE22]` · owns HyDE, the hypothetical-document mechanism, the dense-bottleneck grounding argument, and the comparison against unsupervised dense retrieval.
-- *RAG-Fusion: a New Take on Retrieval-Augmented Generation* — Zackary Rackauckas · arXiv:2402.03367 (IJNLC v13 n1, 2024) · [arxiv.org/abs/2402.03367](https://arxiv.org/abs/2402.03367) — `[RAGFUS23]` · owns multi-query generation fused by RRF and the off-topic-drift failure when generated queries lose relevance to the original.
-- *Measuring and Narrowing the Compositionality Gap in Language Models* — Ofir Press, Muru Zhang, Sewon Min, Ludwig Schmidt, Noah A. Smith, Mike Lewis · arXiv:2210.03350 (EMNLP 2023 Findings) · [arxiv.org/abs/2210.03350](https://arxiv.org/abs/2210.03350) — `[SELFASK22]` · owns self-ask, the compositionality-gap measurement, and the finding that the gap does not shrink with model scale.
-- *Take a Step Back: Evoking Reasoning via Abstraction in Large Language Models* — Huaixiu Steven Zheng, Swaroop Mishra, Xinyun Chen, Heng-Tze Cheng, Ed H. Chi, Quoc V Le, Denny Zhou · arXiv:2310.06117 (ICLR 2024) · [arxiv.org/abs/2310.06117](https://arxiv.org/abs/2310.06117) — `[STEPBACK23]` · owns step-back prompting (abstraction rather than decomposition) and its reported task gains. **No framework primitive:** documented as a technique only; see the thin-documentation note above.
-- *Decomposed Prompting: A Modular Approach for Solving Complex Tasks* — Tushar Khot, Harsh Trivedi, Matthew Finlayson, Yao Fu, Kyle Richardson, Peter Clark, Ashish Sabharwal · arXiv:2210.02406 (ICLR 2023) · [arxiv.org/abs/2210.02406](https://arxiv.org/abs/2210.02406) — `[DECOMP22]` · owns modular sub-task delegation and the explicit incorporation of symbolic retrieval inside a decomposition framework.
-- *CLAM: Selective Clarification for Ambiguous Questions with Generative Language Models* — Lorenz Kuhn, Yarin Gal, Sebastian Farquhar · arXiv:2212.07769 (2022) · [arxiv.org/abs/2212.07769](https://arxiv.org/abs/2212.07769) — `[CLAM22]` · owns the ambiguity-detection failure of current LMs, selective clarification, and simulated-user evaluation of multi-turn clarification.
-- *Adaptive-RAG: Learning to Adapt Retrieval-Augmented Large Language Models through Question Complexity* — Soyeong Jeong, Jinheon Baek, Sukmin Cho, Sung Ju Hwang, Jong C. Park · arXiv:2403.14403 (NAACL 2024) · [arxiv.org/abs/2403.14403](https://arxiv.org/abs/2403.14403) — `[ADAPTIVE24]` · owns the trained-classifier route-selection shape and the three-way choice among no-retrieval, single-step, and iterative retrieval. **M16 owns the broader adaptive/self-correcting family**; M10 cites only the routing-classifier mechanism.
-- *Constructing A Multi-hop QA Dataset for Comprehensive Evaluation of Reasoning Steps* — Xanh Ho, Anh-Khoa Duong Nguyen, Saku Sugawara, Akiko Aizawa · arXiv:2011.01060 (COLING 2020) · [arxiv.org/abs/2011.01060](https://arxiv.org/abs/2011.01060) — `[MULTIHOP20]` · owns 2WikiMultiHopQA and the evidence-path annotation without which multi-hop evaluation measures answer-string matching rather than decomposition. **Key-assignment caveat:** the course blueprint labelled this key "multi-hop decomposition query engines", but the ID resolves to this dataset paper, not to a query-engine paper; the dataset's evidence-path contribution is what this module uses.
+- <a id="src-li-qt"></a>[Query Transformations](https://developers.llamaindex.ai/python/framework/optimizing/advanced_retrieval/query_transformations/) — `[LI-QT]` · owns the single-step/multi-step distinction, the three documented use cases, `HyDEQueryTransform`, `TransformQueryEngine`, `StepDecomposeQueryTransform`, and `MultiStepQueryEngine`.
+- <a id="src-li-router"></a>[Routers](https://developers.llamaindex.ai/python/framework/module_guides/querying/router/) — `[LI-ROUTER]` · owns `RouterQueryEngine`, `RouterRetriever`, the LLM-vs-Pydantic selector distinction, single vs multi selectors, standalone selector use, and the beta `ToolRetrieverRouterQueryEngine`.
+- <a id="src-li-qa"></a>[Q&A patterns](https://developers.llamaindex.ai/python/framework/understanding/putting_it_all_together/q_and_a/) — `[LI-QA]` · owns the `SubQuestionQueryEngine` query-plan description, the multi-step query framing, `DecomposeQueryTransform`, and the fact that `RouterQueryEngine.from_defaults` defaults to `LLMSingleSelector`.
+- <a id="src-li-sq"></a>[Sub Question Query Engine](https://developers.llamaindex.ai/python/examples/query_engine/sub_question_query_engine/) — `[LI-SQ]` · owns the break-down-then-synthesize mechanism, the "Generated 3 sub questions" behaviour, the `CBEventType.SUB_QUESTION` trace structure, and the 66.49 s timing breakdown.
+- <a id="src-hyde22"></a>*Precise Zero-Shot Dense Retrieval without Relevance Labels* — Luyu Gao, Xueguang Ma, Jimmy Lin, Jamie Callan · arXiv:2212.10496 (2022) · [arxiv.org/abs/2212.10496](https://arxiv.org/abs/2212.10496) — `[HYDE22]` · owns HyDE, the hypothetical-document mechanism, the dense-bottleneck grounding argument, and the comparison against unsupervised dense retrieval.
+- <a id="src-ragfus23"></a>*RAG-Fusion: a New Take on Retrieval-Augmented Generation* — Zackary Rackauckas · arXiv:2402.03367 (IJNLC v13 n1, 2024) · [arxiv.org/abs/2402.03367](https://arxiv.org/abs/2402.03367) — `[RAGFUS23]` · owns multi-query generation fused by RRF and the off-topic-drift failure when generated queries lose relevance to the original.
+- <a id="src-selfask22"></a>*Measuring and Narrowing the Compositionality Gap in Language Models* — Ofir Press, Muru Zhang, Sewon Min, Ludwig Schmidt, Noah A. Smith, Mike Lewis · arXiv:2210.03350 (EMNLP 2023 Findings) · [arxiv.org/abs/2210.03350](https://arxiv.org/abs/2210.03350) — `[SELFASK22]` · owns self-ask, the compositionality-gap measurement, and the finding that the gap does not shrink with model scale.
+- <a id="src-stepback23"></a>*Take a Step Back: Evoking Reasoning via Abstraction in Large Language Models* — Huaixiu Steven Zheng, Swaroop Mishra, Xinyun Chen, Heng-Tze Cheng, Ed H. Chi, Quoc V Le, Denny Zhou · arXiv:2310.06117 (ICLR 2024) · [arxiv.org/abs/2310.06117](https://arxiv.org/abs/2310.06117) — `[STEPBACK23]` · owns step-back prompting (abstraction rather than decomposition) and its reported task gains. **No framework primitive:** documented as a technique only; see the thin-documentation note above.
+- <a id="src-decomp22"></a>*Decomposed Prompting: A Modular Approach for Solving Complex Tasks* — Tushar Khot, Harsh Trivedi, Matthew Finlayson, Yao Fu, Kyle Richardson, Peter Clark, Ashish Sabharwal · arXiv:2210.02406 (ICLR 2023) · [arxiv.org/abs/2210.02406](https://arxiv.org/abs/2210.02406) — `[DECOMP22]` · owns modular sub-task delegation and the explicit incorporation of symbolic retrieval inside a decomposition framework.
+- <a id="src-clam22"></a>*CLAM: Selective Clarification for Ambiguous Questions with Generative Language Models* — Lorenz Kuhn, Yarin Gal, Sebastian Farquhar · arXiv:2212.07769 (2022) · [arxiv.org/abs/2212.07769](https://arxiv.org/abs/2212.07769) — `[CLAM22]` · owns the ambiguity-detection failure of current LMs, selective clarification, and simulated-user evaluation of multi-turn clarification.
+- <a id="src-adaptive24"></a>*Adaptive-RAG: Learning to Adapt Retrieval-Augmented Large Language Models through Question Complexity* — Soyeong Jeong, Jinheon Baek, Sukmin Cho, Sung Ju Hwang, Jong C. Park · arXiv:2403.14403 (NAACL 2024) · [arxiv.org/abs/2403.14403](https://arxiv.org/abs/2403.14403) — `[ADAPTIVE24]` · owns the trained-classifier route-selection shape and the three-way choice among no-retrieval, single-step, and iterative retrieval. **M16 owns the broader adaptive/self-correcting family**; M10 cites only the routing-classifier mechanism.
+- <a id="src-multihop20"></a>*Constructing A Multi-hop QA Dataset for Comprehensive Evaluation of Reasoning Steps* — Xanh Ho, Anh-Khoa Duong Nguyen, Saku Sugawara, Akiko Aizawa · arXiv:2011.01060 (COLING 2020) · [arxiv.org/abs/2011.01060](https://arxiv.org/abs/2011.01060) — `[MULTIHOP20]` · owns 2WikiMultiHopQA and the evidence-path annotation without which multi-hop evaluation measures answer-string matching rather than decomposition. **Key-assignment caveat:** the course blueprint labelled this key "multi-hop decomposition query engines", but the ID resolves to this dataset paper, not to a query-engine paper; the dataset's evidence-path contribution is what this module uses.
 
 **Unsupported (synthetic or derived in-file, no located source):** the LogiTrack corpus, the
 180-query evaluation set, the 50-query ops sample and its defect strata, every number in the
 worked-example table, and all tradeoff-ledger entries. These are constructed for teaching and are not
 empirical findings. The $1 + N + 1$ LLM-call count and the "latency is a sum, not a max" claim are
-derived in-file from the `SubQuestionQueryEngine` trace structure [LI-SQ], not measured. The
+derived in-file from the `SubQuestionQueryEngine` trace structure [[LI-SQ]](#src-li-sq), not measured. The
 assertion that there is no documented step-back transform is based on a full-text documentation
-search returning no such class plus its absence from the query-transformations page [LI-QT]; it is a
+search returning no such class plus its absence from the query-transformations page [[LI-QT]](#src-li-qt); it is a
 statement about the **documented** surface, not about the source tree. The opening scene's query,
 its four defect labels, and the "assuming UN3480 … if you meant UN3090" response pattern are LogiTrack
 fiction. The claim that router accuracy depends on tool-description quality is argued from the
-documented mechanism (descriptions are what the LLM selector reads [LI-ROUTER]) and is not measured
+documented mechanism (descriptions are what the LLM selector reads [[LI-ROUTER]](#src-li-router)) and is not measured
 anywhere in this module.
 
 **Verification note:** 🟡 *pending* — Step 7 (memory-less logic review) and Step 8 (literature

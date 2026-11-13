@@ -59,9 +59,9 @@ are wrong within a quarter and the method stays correct for years**.
 > list. `TokenCountingHandler` "track[s] embedding, prompt, and completion token usage," exposes
 > `total_embedding_token_count`, `prompt_llm_token_count`, `completion_llm_token_count`, and
 > `total_llm_token_count`, tracks per-call `TokenCountingEvent` records, and — critically — **counts are
-> cumulative until you call `token_counter.reset_counts()`** [LI-TC]. The cost-analysis guide's
+> cumulative until you call `token_counter.reset_counts()`** [[LI-TC]](#src-li-tc). The cost-analysis guide's
 > `MockLLM(max_tokens=...)` and `MockEmbedding(embed_dim=...)` let you *predict* LLM and embedding token
-> usage before making the calls [LI-CA]. Use the mock path to price an architecture that does not exist
+> usage before making the calls [[LI-CA]](#src-li-ca). Use the mock path to price an architecture that does not exist
 > yet; use the counting handler to check the one that does.
 
 ### The latency waterfall: allocations that sum to 2,500 ms
@@ -121,7 +121,7 @@ below — the same mechanism relieves both waterfalls simultaneously.
 
 ### The cost waterfall: components that sum to $18,000/month
 
-Volumes are computed from the spine's facts (8,500 queries/day, 480,000 documents, 5.04M chunks at
+Volumes are computed from the spine's facts (8,500 queries/day, [480,000 documents](../../syllabus.md#corpus-scale), 5.04M chunks at
 month 12) and from the M16 architecture. **Every unit price is an assumption, price volatile** — the
 method is what transfers, and the substitution instruction is in the "re-derive" note at the end of the
 section.
@@ -172,12 +172,24 @@ CPU absorbed into line 4. The backstop and the audit record cost *milliseconds*,
 that a budget containing only dollars will systematically under-value the controls that are expensive in
 time.
 
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — the table has no parsing line; it assumes text is already extracted.
+> - OCR, layout parsing and vision-model figure captions are metered calls. Give them their own line (→ [M3](../03-parsing-and-chunking/README.md)).
+> - Volume = changed pages or figures per month (from the M14 sync, → [M14](../14-ingestion-at-scale/README.md)), not documents.
+> - Vision captions cost image tokens: `⌈width/28⌉ × ⌈height/28⌉`, so a 1000×1000 image ≈ 1,296 tokens ([Claude vision docs](https://platform.claude.com/docs/en/build-with-claude/vision#resolution-and-token-cost)).
+> - The ingest cache is keyed on node + transformation [[LI-IP]](#src-li-ip). Parsing done in the reader runs before the pipeline, so cache parse output by file hash or pay for it again on every re-sync.
+
 > **Re-deriving this table.** Replace any unit price with your vendor's current rate; the volume column
 > is the part that is yours. It depends on four facts that move on their own schedule: queries/day (8,500
 > at M18 — the spine's number, not a cap), mean input tokens per query (10,400 — set by
 > `similarity_top_k` and chunk size, → M3/M11), the semantic-cache hit rate (26% — set by a threshold you
 > choose, see below), and documents changed per month (40,000 — set by the M14 sync cadence). **A
 > waterfall is a function of those four numbers, not a constant.**
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — mixed-content chunks move the 10,400-token mean, and that mean drives line 8.
+> - Tables tokenise denser: 0.55 vs 0.75 words/token ([corpus scale](../../syllabus.md#corpus-scale)), so ~1.36× the tokens per word. Table-heavy top-k raises the mean.
+> - Figure descriptions stored as text are paid on every retrieval, at the frontier rate. Cap their length (→ [M11](../11-context-assembly-temperature/README.md)).
+> - Sending page images to synthesis instead: one 1000×1000 page ≈ 1,296 input tokens ([Claude vision docs](https://platform.claude.com/docs/en/build-with-claude/vision#resolution-and-token-cost)), ~12% of the 10,400-token prompt per page.
+> - Page-image retrieval (e.g. ColPali) is deferred by decision ([syllabus §1](../../syllabus.md#1-scope-knobs-frozen)).
 
 > **Tradeoff (the ledger entry M18-1).** *Decision:* hold a $2,403.05 (13.4%) uncommitted reserve against
 > the ceiling rather than allocating the budget to zero. *Costs:* $2,403.05/month of compute that is not
@@ -210,12 +222,12 @@ The framework supports all three at different levels of directness. The **ingest
 and persistent: in an `IngestionPipeline`, "each node + transformation combination is hashed and cached,"
 the cache persists with `pipeline.persist(...)` and restores with `pipeline.load(...)`, and the remote
 backends `RedisCache`, `MongoDBCache`, and `FirestoreCache` mean "no persist step is needed, since
-everything is cached as you go" [LI-IP]. That cache is what makes M14's incremental sync affordable — and
+everything is cached as you go" [[LI-IP]](#src-li-ip). That cache is what makes M14's incremental sync affordable — and
 it is the cheapest caching decision in the system because it is already built in. **Prefix caching** is a
 model-provider feature with a framework surface: a cache boundary is marked in the message list and
 everything before it is cached, the response reports `cache_creation_input_tokens`,
 `cache_read_input_tokens`, and `input_tokens` separately so you can *verify* a hit, and the documented
-cacheable-prefix minimum and TTL are provider specifics rather than universal constants [LI-PC]. **The
+cacheable-prefix minimum and TTL are provider specifics rather than universal constants [[LI-PC]](#src-li-pc). **The
 semantic response cache is not a framework primitive** — it is an application component you build, which
 is exactly why its correctness conditions (→ M17) are so easy to get wrong.
 
@@ -305,7 +317,7 @@ the frontier model only on a low-confidence signal. `FrugalGPT` is the canonical
 "LLM cascade which learns which combinations of LLMs to use for different queries in order to reduce
 cost and improve accuracy" — with reported results of matching "the performance of the best individual
 LLM (e.g. GPT-4) with up to 98% cost reduction" or improving "the accuracy over GPT-4 by 4% with the same
-cost" [FRUGAL23]. Note the structure of that result: **98% is the best case, and it is a best case
+cost" [[FRUGAL23]](#src-frugal23). Note the structure of that result: **98% is the best case, and it is a best case
 because every escalation costs the cheap attempt in full plus the frontier call.** A cascade's worst case
 is *worse* than no cascade, and its latency for escalated queries is strictly higher — the cheap attempt
 is serial and precedes the expensive one.
@@ -340,13 +352,13 @@ Three consequences for the waterfall above:
    the same architecture meets 2.5 s at 40% utilisation and misses it at 75%.
 2. **Concurrency is a quality control, not just a latency one.** Concurrent retrievals must not share
    mutable state — and the state that most often leaks across a request boundary is the *tenant and ACL
-   context* (→ M17). The M16 `SubQuestionQueryEngine` example's `use_async=True` [LI-SQ] is the right
+   context* (→ M17). The M16 `SubQuestionQueryEngine` example's `use_async=True` [[LI-SQ]](#src-li-sq) is the right
    instinct for latency and the wrong instinct for isolation unless the principal is threaded explicitly
    into every branch.
 3. **Token budgets are per-request and must be enforced per-request.** A per-stage token budget is
    expressed against the model's declared limits — the `LLMMetadata` fields (`context_window`,
    `num_output`) that `Settings` and each LLM expose, alongside `Settings.llm` and the per-engine
-   override [LI-UC] — and the prompt helper truncates against them. Under concurrency the failure is
+   override [[LI-UC]](#src-li-uc) — and the prompt helper truncates against them. Under concurrency the failure is
    silent: a request whose context was truncated to fit still returns a fluent answer, and its cost is
    lower, so nothing alerts.
 
@@ -510,15 +522,15 @@ controls that do not appear in a dollar column.
   order-of-magnitude-class improvements, and they are not commensurable. PagedAttention/vLLM reports that
   "vLLM improves the throughput of popular LLMs by 2-4× with the same level of latency compared to the
   state-of-the-art systems, such as FasterTransformer and Orca," noting the "improvement is more
-  pronounced with longer sequences, larger models, and more complex decoding algorithms" [KV23].
+  pronounced with longer sequences, larger models, and more complex decoding algorithms" [[KV23]](#src-kv23).
   DistServe reports that it "can serve 7.4x more requests or 12.6x tighter SLO, compared to
   state-of-the-art systems, while staying within latency constraints for > 90% of requests"
-  [DISTSERVE24]. Both cannot be a multiple over the same state of the art, and they are not: vLLM's
+  [[DISTSERVE24]](#src-distserve24). Both cannot be a multiple over the same state of the art, and they are not: vLLM's
   multiple is **throughput at equal latency**, DistServe's is **goodput at an SLO**. DistServe's
   mechanism is the load-bearing finding for a latency budget: colocating the phases "leads to strong
   prefill-decoding interferences" and couples their resource allocation, so that "in the presence of
   stringent latency requirements, existing systems have to prioritize one latency over the other, or
-  over-provision compute resources to meet both" [DISTSERVE24]. **What to change:** do not plan a
+  over-provision compute resources to meet both" [[DISTSERVE24]](#src-distserve24). **What to change:** do not plan a
   latency budget by dividing a tokens-per-second figure by your output length. TTFT (line 9) and TPOT
   (line 10) are in tension on shared hardware, so the two stages allocated separately above behave as one
   coupled quantity under load — and the coupling is where SLO violations originate. This module found no
@@ -526,12 +538,12 @@ controls that do not appear in a dollar column.
   on hardware you will not match. **Treat every multiple as an assumption with a source, not a fact.**
 - **"Semantic caching reduces cost and latency, and lowers false hit rates."** The literature reports a
   workload argument and an accuracy claim. Workload: "Caching is a natural solution to reduce LLM
-  inference costs on repeated queries, which constitute about 31% of the total queries" [SEMCACHE23].
+  inference costs on repeated queries, which constitute about 31% of the total queries" [[SEMCACHE23]](#src-semcache23).
   Accuracy: existing methods "are incapable of finding semantic similarities among LLM queries nor do
   they operate on contextual queries, leading to unacceptable false hit-and-miss rates," and the proposed
   method "attains an approximately 17% higher F-score and a 20% increase in precision during semantic
   cache hit-and-miss decisions," with "the storage requirement by 83%" reduced and decisions "by 11%"
-  accelerated [SEMCACHE23]. **What to change:** read the shape of the claim, not its size. Better
+  accelerated [[SEMCACHE23]](#src-semcache23). **What to change:** read the shape of the claim, not its size. Better
   *hit-and-miss decisions* is a claim about a classifier, not about the production false-hit rate — and
   the convexity table above shows the production outcome is dominated by $c_{wrong}$, which no caching
   paper measures because it is application-specific. The 31% figure is a workload statistic from one
@@ -541,9 +553,9 @@ controls that do not appear in a dollar column.
   which is why entry M18-2's trigger is a measurement rather than a threshold.
 - **"Cascade routing cuts cost by up to 98%."** FrugalGPT reports "match[ing] the performance of the best
   individual LLM (e.g. GPT-4) with up to 98% cost reduction or improv[ing] the accuracy over GPT-4 by 4%
-  with the same cost" [FRUGAL23]. Both numbers are real and both are conditional. "Up to 98%" is the
+  with the same cost" [[FRUGAL23]](#src-frugal23). Both numbers are real and both are conditional. "Up to 98%" is the
   favorable end of a distribution over queries, and the paper's own mechanism explains why: the cascade
-  "learns which combinations of LLMs to use for different queries" [FRUGAL23], so the saving is a
+  "learns which combinations of LLMs to use for different queries" [[FRUGAL23]](#src-frugal23), so the saving is a
   function of how many queries the cheap tier can carry *on that workload*. **What to change:** quote the
   number you *measure*, and report the escalation rate alongside it — the escalation rate is the
   parameter you control, the saving is its consequence. A cascade with a 62% cheap-tier share and an
@@ -552,7 +564,7 @@ controls that do not appear in a dollar column.
 - **"Optimize the infrastructure bill."** Here there is no disagreement, only a silence: this module
   located no paper that models a *production RAG system's* total unit economics end to end (ingest
   embedding, storage, ANN, rerank, generation, evaluation, caching) with a stated method. The closest
-  instruments are the framework's own token predictors and counters [LI-CA] [LI-TC], which measure
+  instruments are the framework's own token predictors and counters [[LI-CA]](#src-li-ca) [[LI-TC]](#src-li-tc), which measure
   tokens rather than dollars, and the serving papers above, which measure one component. **What to
   change:** treat the waterfall as a method you must instantiate, not a result you may cite. The volumes
   are derivable from your corpus and traffic, the prices are yours to look up, the arithmetic is in the
@@ -563,16 +575,16 @@ controls that do not appear in a dollar column.
 
 ## Sources
 
-- [Callbacks — Token Counting Handler](https://developers.llamaindex.ai/python/examples/observability/tokencountinghandler/) — `[LI-TC]` · owns `TokenCountingHandler`, the `total_embedding_token_count` / `prompt_llm_token_count` / `completion_llm_token_count` / `total_llm_token_count` accessors, `TokenCountingEvent`, `reset_counts()`, and the cumulative-until-reset behaviour.
-- [Cost Analysis](https://developers.llamaindex.ai/python/framework/understanding/evaluating/cost_analysis/) — `[LI-CA]` · owns the per-index cost structure (including which indices make zero LLM calls at build time and the `N`-calls-per-query behaviour of `SummaryIndex` vs `log(N)` for `TreeIndex` vs one call for `VectorStoreIndex`), and the `MockLLM(max_tokens=...)` / `MockEmbedding(embed_dim=...)` token predictors.
-- [Ingestion Pipeline](https://developers.llamaindex.ai/python/framework/module_guides/loading/ingestion_pipeline/) — `[LI-IP]` · owns the node+transformation hash cache, `pipeline.persist()` / `load()`, the `RedisCache` / `MongoDBCache` / `FirestoreCache` remote backends, and `num_workers` parallel execution.
-- [Anthropic Prompt Caching](https://developers.llamaindex.ai/python/framework/integrations/llm/anthropic_prompt_caching/) — `[LI-PC]` · owns the prefix-caching interface (a cache boundary in the message list, `CachePoint`/`CacheControl`, TTL selection) and the response fields (`cache_creation_input_tokens`, `cache_read_input_tokens`, `input_tokens`) that let you verify a hit; the minimum cacheable prompt length and default TTL reported there are that provider's specifics.
-- [Customizing LLMs within LlamaIndex Abstractions](https://developers.llamaindex.ai/python/framework/module_guides/models/llms/usage_custom/) — `[LI-UC]` · owns `Settings.llm`, per-query-engine LLM override, and the `LLMMetadata` fields (`context_window`, `num_output`, `model_name`) that a per-stage token budget is expressed against.
-- [Sub-Question Query Engine](https://developers.llamaindex.ai/python/examples/query_engine/sub_question_query_engine/) — `[LI-SQ]` · cited only for its `use_async=True` concurrency flag and the serial execution its trace documents; the decomposition pattern and its cost are M16's.
-- *Efficient Memory Management for Large Language Model Serving with PagedAttention* — Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E. Gonzalez, Hao Zhang, Ion Stoica · arXiv:2309.06180 (SOSP 2023) · [arxiv.org/abs/2309.06180](https://arxiv.org/abs/2309.06180) — `[KV23]` · owns PagedAttention, KV-cache memory management, and the reported 2–4× throughput improvement at equal latency.
-- *DistServe: Disaggregating Prefill and Decoding for Goodput-optimized Large Language Model Serving* — Yinmin Zhong, Shengyu Liu, Junda Chen, Jianbo Hu, Yibo Zhu, Xuanzhe Liu, Xin Jin, Hao Zhang · arXiv:2401.09670 (OSDI 2024) · [arxiv.org/abs/2401.09670](https://arxiv.org/abs/2401.09670) — `[DISTSERVE24]` · owns the prefill-decoding interference result, the TTFT/TPOT framing, and the goodput-at-SLO measurement that explains why a throughput number is not a latency number.
-- *MeanCache: User-Centric Semantic Caching for LLM Web Services* — Waris Gill, Mohamed Elidrisi, Pallavi Kalapatapu, Ammar Ahmed, Ali Anwar, Muhammad Ali Gulzar · arXiv:2403.02694 (v4, 2025; IPDPS 2025) · [arxiv.org/abs/2403.02694](https://arxiv.org/abs/2403.02694) — `[SEMCACHE23]` · owns the semantic-cache motivation (≈31% repeated queries), the false-hit/miss-rate problem, and the reported classifier improvements (+17% F-score, +20% precision, −83% storage, 11% faster decisions). *Key name follows the syllabus's reserved key; the verified paper is 2024/2025, and no solid 2023 semantic-caching paper for LLM serving was located — stated here rather than substituted silently.*
-- *FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance* — Lingjiao Chen, Matei Zaharia, James Zou · arXiv:2305.05176 (2023) · [arxiv.org/abs/2305.05176](https://arxiv.org/abs/2305.05176) — `[FRUGAL23]` · owns the LLM-cascade strategy (prompt adaptation, LLM approximation, LLM cascade) and the reported up-to-98% cost reduction / +4% accuracy results.
+- <a id="src-li-tc"></a>[Callbacks — Token Counting Handler](https://developers.llamaindex.ai/python/examples/observability/tokencountinghandler/) — `[LI-TC]` · owns `TokenCountingHandler`, the `total_embedding_token_count` / `prompt_llm_token_count` / `completion_llm_token_count` / `total_llm_token_count` accessors, `TokenCountingEvent`, `reset_counts()`, and the cumulative-until-reset behaviour.
+- <a id="src-li-ca"></a>[Cost Analysis](https://developers.llamaindex.ai/python/framework/understanding/evaluating/cost_analysis/) — `[LI-CA]` · owns the per-index cost structure (including which indices make zero LLM calls at build time and the `N`-calls-per-query behaviour of `SummaryIndex` vs `log(N)` for `TreeIndex` vs one call for `VectorStoreIndex`), and the `MockLLM(max_tokens=...)` / `MockEmbedding(embed_dim=...)` token predictors.
+- <a id="src-li-ip"></a>[Ingestion Pipeline](https://developers.llamaindex.ai/python/framework/module_guides/loading/ingestion_pipeline/) — `[LI-IP]` · owns the node+transformation hash cache, `pipeline.persist()` / `load()`, the `RedisCache` / `MongoDBCache` / `FirestoreCache` remote backends, and `num_workers` parallel execution.
+- <a id="src-li-pc"></a>[Anthropic Prompt Caching](https://developers.llamaindex.ai/python/framework/integrations/llm/anthropic_prompt_caching/) — `[LI-PC]` · owns the prefix-caching interface (a cache boundary in the message list, `CachePoint`/`CacheControl`, TTL selection) and the response fields (`cache_creation_input_tokens`, `cache_read_input_tokens`, `input_tokens`) that let you verify a hit; the minimum cacheable prompt length and default TTL reported there are that provider's specifics.
+- <a id="src-li-uc"></a>[Customizing LLMs within LlamaIndex Abstractions](https://developers.llamaindex.ai/python/framework/module_guides/models/llms/usage_custom/) — `[LI-UC]` · owns `Settings.llm`, per-query-engine LLM override, and the `LLMMetadata` fields (`context_window`, `num_output`, `model_name`) that a per-stage token budget is expressed against.
+- <a id="src-li-sq"></a>[Sub-Question Query Engine](https://developers.llamaindex.ai/python/examples/query_engine/sub_question_query_engine/) — `[LI-SQ]` · cited only for its `use_async=True` concurrency flag and the serial execution its trace documents; the decomposition pattern and its cost are M16's.
+- <a id="src-kv23"></a>*Efficient Memory Management for Large Language Model Serving with PagedAttention* — Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E. Gonzalez, Hao Zhang, Ion Stoica · arXiv:2309.06180 (SOSP 2023) · [arxiv.org/abs/2309.06180](https://arxiv.org/abs/2309.06180) — `[KV23]` · owns PagedAttention, KV-cache memory management, and the reported 2–4× throughput improvement at equal latency.
+- <a id="src-distserve24"></a>*DistServe: Disaggregating Prefill and Decoding for Goodput-optimized Large Language Model Serving* — Yinmin Zhong, Shengyu Liu, Junda Chen, Jianbo Hu, Yibo Zhu, Xuanzhe Liu, Xin Jin, Hao Zhang · arXiv:2401.09670 (OSDI 2024) · [arxiv.org/abs/2401.09670](https://arxiv.org/abs/2401.09670) — `[DISTSERVE24]` · owns the prefill-decoding interference result, the TTFT/TPOT framing, and the goodput-at-SLO measurement that explains why a throughput number is not a latency number.
+- <a id="src-semcache23"></a>*MeanCache: User-Centric Semantic Caching for LLM Web Services* — Waris Gill, Mohamed Elidrisi, Pallavi Kalapatapu, Ammar Ahmed, Ali Anwar, Muhammad Ali Gulzar · arXiv:2403.02694 (v4, 2025; IPDPS 2025) · [arxiv.org/abs/2403.02694](https://arxiv.org/abs/2403.02694) — `[SEMCACHE23]` · owns the semantic-cache motivation (≈31% repeated queries), the false-hit/miss-rate problem, and the reported classifier improvements (+17% F-score, +20% precision, −83% storage, 11% faster decisions). *Key name follows the syllabus's reserved key; the verified paper is 2024/2025, and no solid 2023 semantic-caching paper for LLM serving was located — stated here rather than substituted silently.*
+- <a id="src-frugal23"></a>*FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance* — Lingjiao Chen, Matei Zaharia, James Zou · arXiv:2305.05176 (2023) · [arxiv.org/abs/2305.05176](https://arxiv.org/abs/2305.05176) — `[FRUGAL23]` · owns the LLM-cascade strategy (prompt adaptation, LLM approximation, LLM cascade) and the reported up-to-98% cost reduction / +4% accuracy results.
 
 **Unsupported (synthetic, no located source):** the LogiTrack invoice of $41,600 and every figure in the
 shipped waterfall's volume column, the reserve, all savings and quality-cost figures in the cut list, the

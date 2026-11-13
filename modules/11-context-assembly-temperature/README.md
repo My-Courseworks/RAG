@@ -17,7 +17,7 @@ that goes into a customer quote. It has to be right, and it has to be stable. It
 **Monday:** *"The DG surcharge is 3.5% of the base rate, per clause 7.2 of CARRIER-2211."*
 **Tuesday:** *"The DG surcharge is 3.15% of the base rate, per clause 7.2 of CARRIER-2211."*
 
-Clause 7.2 says 3.5%. Nothing in the 3,000-document corpus says 3.15% — not the rate tables, not the
+Clause 7.2 says 3.5%. Nothing in the [3,000-document corpus](../../syllabus.md#corpus-scale) says 3.15% — not the rate tables, not the
 bulletins. The 3.15% was not in the retrieved context either: the same clause was retrieved both
 days, by a byte-identical pipeline.
 
@@ -50,7 +50,7 @@ exposes the budget as two settings, documented as "arguments/values [that] are u
 to ensure that the input prompts to the LLM have enough room to generate a certain number of tokens":
 `Settings.context_window` is the "maximum input size to the LLM" and `Settings.num_output` is the
 "number of tokens reserved for text generation", both of which "are automatically configured using
-attributes from the LLM, but … can be overridden in special cases." [LI-SET]
+attributes from the LLM, but … can be overridden in special cases." [[LI-SET]](#src-li-set)
 
 $$\text{evidence budget} = \texttt{context\_window} - \texttt{num\_output} - (\text{system prompt} + \text{question} + \text{template scaffolding})$$
 
@@ -77,27 +77,29 @@ entropy each call is allowed**. Both are configuration, and neither appears in a
 Four consequences, each a decision this module asks you to make.
 
 **`context_window` is an input limit, not a total.** Because `num_output` is *reserved* out of the
-window [LI-SET], the usable evidence budget is strictly smaller than the headline context length. A
+window [[LI-SET]](#src-li-set), the usable evidence budget is strictly smaller than the headline context length. A
 `num_output` that is too small truncates the *answer*, not the evidence — a different failure that
 looks like a generation bug.
+
+> $\color{red}\text{to be discussed more}$ — the evidence budget must be computed on *post-expansion* sizes: auto-merge swaps 128-token leaves for 512/2048-token parents, and sentence windows swap a sentence for ~7, so where does that swap happen and how much of the window does it really eat (→ [M3](../03-parsing-and-chunking/README.md#overlap-what-it-buys-and-what-it-costs), [M8](../08-index-structures-beyond-flat/README.md#structure-at-index-time-recursive-retrieval-and-auto-merging))?
 
 **Accurate token counting is a prerequisite for all of this, and it does not come for free.** The
 framework warns: "If you change the LLM, you may need to update this tokenizer to ensure accurate token
 counts, chunking, and prompting" — the global tokenizer defaults to `cl100k` from tiktoken, matching
-`gpt-3.5-turbo` [LI-LLM]. Every term in the equation above is measured in that tokenizer's tokens. Run
+`gpt-3.5-turbo` [[LI-LLM]](#src-li-llm). Every term in the equation above is measured in that tokenizer's tokens. Run
 a Gemini or Llama model under the default tokenizer and your evidence budget is computed in the wrong
 units: you will silently over- or under-fill the window, and the error scales with the number of
 chunks.
 
 **The overhead is not zero and not constant.** In a `refine` pipeline the refine template is larger
 than the initial QA template, and the framework's compaction accounts for "the maximum prompt size
-between `text_qa_template` and `refine_template`" [LI-RS] — it budgets for the largest prompt in the
+between `text_qa_template` and `refine_template`" [[LI-RS]](#src-li-rs) — it budgets for the largest prompt in the
 loop. That is the correct, conservative choice, and it means your effective budget is set by the
 template you forgot about.
 
 **Truncation is silent and positional.** `simple_summarize` "Truncates all text chunks to fit into a
 single LLM prompt. Good for quick summarization purposes, but may lose detail due to truncation."
-[LI-RS] Which chunks lose their tails is a function of the order M9 produced, and the cut lands on the
+[[LI-RS]](#src-li-rs) Which chunks lose their tails is a function of the order M9 produced, and the cut lands on the
 lowest-ranked evidence — precisely the evidence M9's reranker called marginal and which may still be
 M3's disambiguating sentence.
 
@@ -108,12 +110,19 @@ Packing n nodes into a token budget is a 0/1 knapsack: items with weights (token
 failure is specific: one oversized chunk at rank 2 can consume half the budget and evict three
 smaller, jointly-more-valuable chunks. The framework's `compact` mode does the greedy thing with a
 twist — it packs "as many text (concatenated/packed from the retrieved chunks) that can fit within the
-context window" and splits the remainder with a `TokenTextSplitter` [LI-RS] — so an oversized chunk is
+context window" and splits the remainder with a `TokenTextSplitter` [[LI-RS]](#src-li-rs) — so an oversized chunk is
 *cut* rather than skipped. Same silent loss, different route.
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — tables and figures are the oversized, odd-shaped items in this knapsack.
+> - A rate table kept whole as one chunk (→ [M3](../03-parsing-and-chunking/README.md#the-structure-aware-path-parsing-before-chunking)) is the rank-2 giant that evicts smaller chunks.
+> - `compact` cuts it by tokens, not rows: later rows lose their header, so a number arrives without its column name.
+> - Numeric tables cost more per word: 0.55 vs 0.75 words/token ([corpus scale](../../syllabus.md#corpus-scale)) ≈ 1.36× the tokens of prose.
+> - Figure captions and vision-model descriptions stored as text draw from the same budget; count them in the model's tokenizer.
+> - Sending page images straight to a vision LLM is deferred ([syllabus §1](../../syllabus.md#1-scope-knobs-frozen)); per-image token cost → [M18](../18-cost-and-latency/README.md).
 
 The counter-consideration is position, and **M9 owns that claim**: the position-bias literature shows
 performance is highest when relevant information sits at the beginning or end of the input context and
-degrades in the middle, "even for explicitly long-context models" [LITM23]. M11 does not re-survey
+degrades in the middle, "even for explicitly long-context models" [[LITM23]](#src-litm23). M11 does not re-survey
 that finding; it applies it. The two facts interact badly: a relevance-ordered fill puts the *best*
 evidence first (good) and the *most marginal* evidence in the middle (where it is hardest to use) and
 then truncates the end. **The fill order that optimizes the knapsack and the fill order that
@@ -122,9 +131,9 @@ reorder by position — which is exactly the two separate decisions M9's headlin
 entry set up.
 
 > **LlamaIndex at a glance:** `Settings.context_window` and `Settings.num_output` are the two knobs
-> that define the assembly budget, global defaults overridable per module [LI-SET]. The framework's
+> that define the assembly budget, global defaults overridable per module [[LI-SET]](#src-li-set). The framework's
 > own examples pair `Settings.context_window = 3900` with `Settings.num_output = 512` for a legacy 4k
-> model (a 13% reservation), and `4096` with `256` in the Settings guide [LI-SET]. No default and no
+> model (a 13% reservation), and `4096` with `256` in the Settings guide [[LI-SET]](#src-li-set). No default and no
 > guidance is given: the reservation is yours to pick, and it is an ADR line item.
 
 > **Tradeoff (the ledger entry M11-1).** *Decision:* reserve a fixed `num_output` out of the context
@@ -142,24 +151,24 @@ entry set up.
 
 The synthesizer "generates a response from an LLM, using a user query and a given set of text chunks"
 and runs "after nodes are retrieved from a retriever, and after any node-postprocessors are ran"
-[LI-RS]. Its `response_mode` is the most consequential assembly parameter, because it determines how
+[[LI-RS]](#src-li-rs). Its `response_mode` is the most consequential assembly parameter, because it determines how
 many LLM calls one user query costs. Assembled from the two places the modes are documented
-[LI-RS, LI-RM], with $N$ the number of nodes reaching the synthesizer:
+[[LI-RS](#src-li-rs), [LI-RM](#src-li-rm)], with $N$ the number of nodes reaching the synthesizer:
 
 | `response_mode` | Documented mechanism | LLM calls | Fails by |
 |---|---|---|---|
-| `no_text` | "Only runs the retriever to fetch the nodes that would have been sent to the LLM, without actually sending them" [LI-RS] | **0** | producing no answer — a debugging/measurement mode |
-| `context_only` | "Returns a concatenated string of all text chunks" [LI-RS] | **0** | producing no answer |
-| `simple_summarize` | "Truncates all text chunks to fit into a single LLM prompt" [LI-RS] | **1** | silent truncation past the cut |
-| `compact` *(default)* | packs what fits, splits the rest with a `TokenTextSplitter`, then treats each part as a chunk "sent to the `refine` synthesizer" [LI-RS] | $\approx \lceil \text{tokens}/B\rceil$ | the last chunk read dominates the answer |
-| `refine` | "create and refine an answer by sequentially going through each retrieved text chunk. This makes a separate LLM call per Node/retrieved chunk" [LI-RS] | **$N$** | late chunks can overwrite correct earlier answers |
-| `accumulate` | "apply the query to each text chunk while accumulating the responses into an array. Returns a concatenated string of all responses" [LI-RS] | **$N$** | returns a list, not an answer — not synthesis at all |
-| `compact_accumulate` | "The same as accumulate, but will 'compact' each LLM prompt similar to `compact`" [LI-RS] | **$N$** | same as `accumulate` |
-| `tree_summarize` | recursion until "there's only one chunk left, and thus only one final answer" [LI-RS] | $\approx 2\times$ packed groups | cost grows with context volume, not question difficulty |
+| `no_text` | "Only runs the retriever to fetch the nodes that would have been sent to the LLM, without actually sending them" [[LI-RS]](#src-li-rs) | **0** | producing no answer — a debugging/measurement mode |
+| `context_only` | "Returns a concatenated string of all text chunks" [[LI-RS]](#src-li-rs) | **0** | producing no answer |
+| `simple_summarize` | "Truncates all text chunks to fit into a single LLM prompt" [[LI-RS]](#src-li-rs) | **1** | silent truncation past the cut |
+| `compact` *(default)* | packs what fits, splits the rest with a `TokenTextSplitter`, then treats each part as a chunk "sent to the `refine` synthesizer" [[LI-RS]](#src-li-rs) | $\approx \lceil \text{tokens}/B\rceil$ | the last chunk read dominates the answer |
+| `refine` | "create and refine an answer by sequentially going through each retrieved text chunk. This makes a separate LLM call per Node/retrieved chunk" [[LI-RS]](#src-li-rs) | **$N$** | late chunks can overwrite correct earlier answers |
+| `accumulate` | "apply the query to each text chunk while accumulating the responses into an array. Returns a concatenated string of all responses" [[LI-RS]](#src-li-rs) | **$N$** | returns a list, not an answer — not synthesis at all |
+| `compact_accumulate` | "The same as accumulate, but will 'compact' each LLM prompt similar to `compact`" [[LI-RS]](#src-li-rs) | **$N$** | same as `accumulate` |
+| `tree_summarize` | recursion until "there's only one chunk left, and thus only one final answer" [[LI-RS]](#src-li-rs) | $\approx 2\times$ packed groups | cost grows with context volume, not question difficulty |
 
 Four facts decide real architectures.
 
-**The default is not the cheap mode.** `compact` is the documented default [LI-RM] and it is a *refine
+**The default is not the cheap mode.** `compact` is the documented default [[LI-RM]](#src-li-rm) and it is a *refine
 chain*, not a single call. A team that never sets `response_mode` pays
 $\lceil\text{tokens}/B\rceil$ calls per query while reading a page that would have told them one call
 was available. That gap between default and floor is where most RAG cost overruns originate (→ M18).
@@ -170,7 +179,7 @@ iterative manner. A model output shows what might be needed to finish a task, an
 informative context for retrieving more relevant knowledge which in turn helps generate a better output
 in the next iteration." They evaluate on "multi-hop question answering, fact verification, and
 commonsense reasoning" and report it "is superior to or competitive with state-of-the-art
-retrieval-augmented baselines while causing fewer overheads of retrieval and generation." [ITERRETGEN23]
+retrieval-augmented baselines while causing fewer overheads of retrieval and generation." [[ITERRETGEN23]](#src-iterretgen23)
 The mechanism also explains the failure: each step is conditioned on the *previous answer*, so an error
 at chunk 1 propagates and can be "refined" further from the truth by chunk 4. Chained generation is a
 Markov process over your own mistakes.
@@ -178,7 +187,7 @@ Markov process over your own mistakes.
 **`tree_summarize`'s recursion is not ad-hoc.** Wu et al. validate exactly this shape for whole-book
 summarization: "the model first summarizes small sections of the book and then recursively summarizes
 these summaries to produce a summary of the entire book", reaching "state-of-the-art results on the
-recent BookSum dataset for book-length summarization" [RECURSIVE21]. Its cost profile follows from
+recent BookSum dataset for book-length summarization" [[RECURSIVE21]](#src-recursive21). Its cost profile follows from
 that: the call count depends on how many token groups your *context* occupies, not on how hard the
 *question* is.
 
@@ -187,22 +196,22 @@ that: the call count depends on how many token groups your *context* occupies, n
 that are not relevant to the question being asked", and the docs bound the scope immediately: "This
 option is particularly useful if you're using an OpenAI model that supports function calling … Other
 LLM providers or models that don't have native function calling support may be less reliable in
-producing the structured response this feature relies on." [LI-RS] That is a **third** filtering
+producing the structured response this feature relies on." [[LI-RS]](#src-li-rs) That is a **third** filtering
 opportunity after M6's metadata filters and M9's reranker, and the only one that sees each node in the
 context of the question at generation time — at the cost of a generation step per node.
 
 The long-form synthesis reference the syllabus assigns here is narrower than its label, and worth
 stating precisely. Manathunga & Illangasekera present "a combined extractive and abstractive
 summarization method for large unstructured textual data using representative vectors" in a
-medical-education RAG application [LONGFORM23] — a domain summarization method, not a general
+medical-education RAG application [[LONGFORM23]](#src-longform23) — a domain summarization method, not a general
 treatment of long-form response synthesis. **Syllabus label mismatch, flagged:** the blueprint assigned
 this paper the label "long-form RAG response synthesis"; the modes' provenance rests instead on
-[ITERRETGEN23] and [RECURSIVE21], which own the iterative and recursive mechanisms.
+[[ITERRETGEN23]](#src-iterretgen23) and [[RECURSIVE21]](#src-recursive21), which own the iterative and recursive mechanisms.
 
 > **LlamaIndex at a glance:** `get_response_synthesizer(response_mode="compact")` — or
 > `ResponseMode.COMPACT` — then `response_synthesizer.synthesize("query text", nodes=[...])`, or pass
-> it via `index.as_query_engine(response_synthesizer=...)` [LI-RS]. The mode is also settable as
-> `index.as_query_engine(response_mode="tree_summarize")` [LI-QA], and the query-engine kwarg is what
+> it via `index.as_query_engine(response_synthesizer=...)` [[LI-RS]](#src-li-rs). The mode is also settable as
+> `index.as_query_engine(response_mode="tree_summarize")` [[LI-QA]](#src-li-qa), and the query-engine kwarg is what
 > ends up in most codebases — which is why `compact`'s status as a multi-call mode is so widely
 > unknown.
 
@@ -224,7 +233,7 @@ and the `refine_template`." The first is "used to get an initial answer to a que
 nodes"; the second is "used when the retrieved text does not fit into a single LLM call with
 `response_mode="compact"` (the default), or when more than one node is retrieved using
 `response_mode="refine"`. The answer from the first query is inserted as an `existing_answer`, and the
-LLM must update or repeat the existing answer based on the new context." [LI-PROMPTP]
+LLM must update or repeat the existing answer based on the new context." [[LI-PROMPTP]](#src-li-promptp)
 
 That last sentence is a specification of a prompting hazard. In `refine`, the model is told to "update
 or repeat" an `existing_answer` — which an earlier call produced one step ago. A prompt that says
@@ -235,21 +244,21 @@ template.
 **The default template is copy-and-modify, and the framework says so.** "LlamaIndex uses a set of
 default prompt templates that work well out of the box… **The best method for customizing is copying
 the default prompt from the link above, and using that as the base for any modifications.**"
-[LI-PROMPT] That is unusually direct and it is the right procedure: the defaults encode prompt
+[[LI-PROMPT]](#src-li-prompt) That is unusually direct and it is the right procedure: the defaults encode prompt
 engineering you did not do, and from-scratch rewrites usually regress.
 
 **Prompts are addressable, and the addressing matters.** `get_prompts` returns "a flat list of prompts
 used within the module and nested submodules", and the keys are namespaced — a compact query engine
 returns `['response_synthesizer:text_qa_template', 'response_synthesizer:refine_template']`, updated via
-`query_engine.update_prompts({...})` [LI-PROMPTP]. The namespacing is not cosmetic: it tells you a
+`query_engine.update_prompts({...})` [[LI-PROMPTP]](#src-li-promptp). The namespacing is not cosmetic: it tells you a
 *query engine* contains a *response synthesizer* which contains the prompts, so overriding the wrong
 level silently does nothing. The high-level (`as_query_engine(text_qa_template=..., refine_template=...)`)
 and low-level (`get_response_synthesizer(text_qa_template=..., refine_template=...)`) forms are
-documented as equivalent [LI-PROMPTP].
+documented as equivalent [[LI-PROMPTP]](#src-li-promptp).
 
 **System prompts, and where the abstraction stops.** A system prompt is expressible as a
 `{% chat role="system" %}` block in the Jinja-style template, or as
-`ChatMessage(content="You are an expert system.", role=MessageRole.SYSTEM)` [LI-PROMPTP]. The question
+`ChatMessage(content="You are an expert system.", role=MessageRole.SYSTEM)` [[LI-PROMPTP]](#src-li-promptp). The question
 that matters is a *priority* question, and here the framework's abstraction ends and the model's
 behaviour takes over. Wallace, Xiao, Leike, Weng, Heidecke & Beutel identify the vulnerability:
 "LLMs often consider system prompts (e.g., text from an application developer) to be the same priority
@@ -257,7 +266,7 @@ as text from untrusted users and third parties", and propose "an instruction hie
 defines how models should behave when instructions of different priorities conflict", trained via data
 generation that "teaches LLMs to selectively ignore lower-privileged instructions", reporting that it
 "drastically increases robustness — even for attack types not seen during training — while imposing
-minimal degradations on standard capabilities." [INSTRHIER24]
+minimal degradations on standard capabilities." [[INSTRHIER24]](#src-instrhier24)
 
 Two consequences follow, and the second is the one engineers get wrong. **Retrieved evidence is
 untrusted, lowest-priority text arriving in the same window as your instructions** — that is the
@@ -268,21 +277,21 @@ context is insufficient" — is a *suggestion alongside* the corpus, not a const
 prompt-level instruction-following under retrieved evidence is best-effort, and any constraint that
 must hold belongs in code. **The framework gives you no way to express priority:** roles are the API
 surface and are passed to the provider; whether the provider enforces system-over-context is a model
-property, exactly as [INSTRHIER24] describes.
+property, exactly as [[INSTRHIER24]](#src-instrhier24) describes.
 
 > **LlamaIndex at a glance:** `RichPromptTemplate` supports `{% chat role="system" %}` blocks and
 > `{% for %}` loops over nodes, and the guide shows both a system-role and a node-iterating user
-> template as first-class patterns [LI-PROMPTP]. `TreeSummarize(verbose=True, summary_template=qa_prompt)`
+> template as first-class patterns [[LI-PROMPTP]](#src-li-promptp). `TreeSummarize(verbose=True, summary_template=qa_prompt)`
 > shows a synthesizer taking a custom template directly, and
 > `summarizer.get_response("who is Paul Graham?", [text], tone_name="a Shakespeare play")` shows extra
-> template variables at call time [LI-RS] — the mechanism for injecting a per-request instruction (a
+> template variables at call time [[LI-RS]](#src-li-rs) — the mechanism for injecting a per-request instruction (a
 > tone, an output schema, a jurisdiction) without rebuilding the synthesizer.
 
 > **Tradeoff (the ledger entry M11-3).** *Decision:* state answer constraints in the system prompt
 > **and** enforce the ones that must hold in code, rather than relying on instruction-following under
 > retrieved evidence. *Costs:* a validation layer, a refusal/retry path, and a second failure mode to
 > instrument; a rejected answer is worse UX than a slightly-wrong accepted one. *Accepted because:* the
-> instruction hierarchy is a model property, not an application property [INSTRHIER24] — a constraint
+> instruction hierarchy is a model property, not an application property [[INSTRHIER24]](#src-instrhier24) — a constraint
 > that exists only as prompt text has a model-dependent probability of being honoured, which is not a
 > basis for a compliance-relevant output. *Reverses if:* the output is genuinely free-form (a summary, an
 > explanation) where no single assertion can be validated — then the prompt *is* the constraint and the
@@ -312,7 +321,7 @@ on the modes; higher temperature spreads it into the tail. "Creativity" and "div
 
 The rescaling is the same operation as **temperature scaling** in the calibration literature, where Guo,
 Pleiss, Sun & Weinberger find that "on most datasets, temperature scaling — a single-parameter variant
-of Platt Scaling — is surprisingly effective at calibrating predictions" [GUO17]. Be precise about the
+of Platt Scaling — is surprisingly effective at calibrating predictions" [[GUO17]](#src-guo17). Be precise about the
 difference, because conflating them is a common error: Guo et al. *fit* one scalar $T$ on held-out data
 so predicted probabilities match empirical accuracy — a post-hoc fix for miscalibration. Sampling
 temperature *sets* $T$ as a generation hyperparameter, never fitting it, and uses the enlarged entropy
@@ -339,7 +348,7 @@ produces slightly different logits from identical weights and identical input. S
 less non-determinism than the default configuration (temperature=1)." Their broader result is that "the
 ratio of coding tasks with zero equal test output across different requests is 75.76%, 51.00%, and 47.56%
 for CodeContests, APPS, and HumanEval, respectively" — measured at the default configuration, with the
-$T=0$ finding stated as a separate and weaker claim. [OUYANG24] `temperature=0` is a **variance reducer**,
+$T=0$ finding stated as a separate and weaker claim. [[OUYANG24]](#src-ouyang24) `temperature=0` is a **variance reducer**,
 not a determinism switch.
 
 ### How temperature interacts with top-p, top-k, and seeds
@@ -358,7 +367,7 @@ parameter with the other disabled, or you cannot attribute the effect.
 **Seeds are provider-dependent, and this module cannot claim otherwise uniformly.** What was *verified*
 here: the framework's Anthropic integration documents a hard interaction between temperature and a
 provider feature — the extended-thinking example's comment reads "temperature must be 1.0 for thinking
-to work", with `thinking_dict={"type": "enabled", "budget_tokens": 1600}` [LI-ANTHROPIC]. That is a real
+to work", with `thinking_dict={"type": "enabled", "budget_tokens": 1600}` [[LI-ANTHROPIC]](#src-li-anthropic). That is a real
 constraint in which a reasoning mode *fixes* temperature at one value, so the setting your application
 wants to vary may be unavailable in the mode you want. What was **not** verified here: the existence,
 semantics, or cross-provider consistency of a `seed` parameter — no provider API reference was fetched
@@ -368,9 +377,9 @@ not address reason 3: a seed makes *your* sampling reproducible given fixed logi
 the part that moves.
 
 > **LlamaIndex at a glance:** temperature is a constructor parameter on the LLM, settable globally or
-> per module — `Settings.llm = OpenAI(model="gpt-3.5-turbo", temperature=0.1)` [LI-SET] and
-> `llm = OpenAI(temperature=0.1, model="gpt-4o-mini")` [LI-LLMC]. Note what the framework's own examples
-> use: **`0.1`, in both places, and never `0.0`** [LI-SET, LI-LLMC]. The reference stack therefore
+> per module — `Settings.llm = OpenAI(model="gpt-3.5-turbo", temperature=0.1)` [[LI-SET]](#src-li-set) and
+> `llm = OpenAI(temperature=0.1, model="gpt-4o-mini")` [[LI-LLMC]](#src-li-llmc). Note what the framework's own examples
+> use: **`0.1`, in both places, and never `0.0`** [[LI-SET](#src-li-set), [LI-LLMC](#src-li-llmc)]. The reference stack therefore
 > demonstrates a low-but-nonzero temperature and demonstrates *no practice at all* for the regime this
 > module argues for on extraction tasks. That silence is why the matrix below is a hypothesis.
 
@@ -391,7 +400,7 @@ prompt-engineering techniques to solve the MCQA problems while increasing the sa
 0.0 to 1.6" — concludes: *"Despite anecdotal reports to the contrary, our empirical results indicate
 that changes in temperature from 0.0 to 1.0 do not have a statistically significant impact on LLM
 performance for problem-solving tasks. In addition, these results appear to generalize across LLMs,
-prompt-engineering techniques, and problem domains."* [RENZE24]
+prompt-engineering techniques, and problem domains."* [[RENZE24]](#src-renze24)
 
 That is in direct tension with the matrix, and the tension is the module's most important lesson. Two
 readings resolve it, and you decide which applies **by measuring**:
@@ -412,20 +421,20 @@ lab sweeps temperature rather than reading about it.
 ### The protocol: measure answer variance across repeated runs
 
 One non-obvious design requirement: **a single run per temperature measures nothing.** Output is
-stochastic even at fixed temperature [OUYANG24], so comparing one $T=0$ answer to one $T=0.7$ answer
+stochastic even at fixed temperature [[OUYANG24]](#src-ouyang24), so comparing one $T=0$ answer to one $T=0.7$ answer
 compares two samples from two distributions, not two distributions. You need repeats, and a statistic
 that separates "the answer changed" from "the wording changed."
 
 1. **Fix everything but temperature.** Same index, query set, retriever and reranker settings, prompt.
    Cache the retrieval — `response_mode="no_text"` captures the node set without calling the LLM
-   [LI-RS] — so retrieval non-determinism cannot contaminate the comparison. If the candidate set
+   [[LI-RS]](#src-li-rs) — so retrieval non-determinism cannot contaminate the comparison. If the candidate set
    differs between runs you are measuring M5/M7, not M11.
 2. **Sweep $T \in \{0, 0.2, 0.5, 0.7, 1.0\}$, $R = 5$ repeats each.** Five is not a large sample; it is
    enough to see whether variance is zero, small, or large, which is the decision-relevant resolution.
    For a publishable number you need error bars, and Miller's treatment is the reference for how to
    compute them: "Conceptualizing evaluation questions as having been drawn from an unseen
    super-population, we present formulas for analyzing evaluation data, measuring differences between two
-   models, and planning an evaluation experiment." [MILLER24]
+   models, and planning an evaluation experiment." [[MILLER24]](#src-miller24)
 3. **Score three separate things per run** — the part everyone collapses into one number.
    **(a)** *Exact-match rate* on the answer's **payload** (the number, the UN code, the clause id) — the
    metric that catches the opening scene. **(b)** *Distinct-payload count* across the $R$ repeats: a
@@ -440,7 +449,7 @@ that separates "the answer changed" from "the wording changed."
    does nothing.
 
 **The honest caveat, restated because it bounds every result:** greedy decoding is not reproducible
-across hardware, batching, or quantization [OUYANG24]. So "T=0 gives the same answer every time" is a
+across hardware, batching, or quantization [[OUYANG24]](#src-ouyang24). So "T=0 gives the same answer every time" is a
 claim about *your deployment today, at that batch size, on that hardware* — falsified by a provider-side
 kernel update, a change in your concurrency, or a model re-quantization, none of which appear in your
 config diff. If you need determinism, get it from a validator and a prompt-keyed cache, not from a
@@ -453,7 +462,7 @@ sampling parameter.
 > of degenerate loops on some models. *Accepted because:* for extraction and rewriting the output is
 > checked by a machine, and a machine check cannot be satisfied by a plausible variation — only by the
 > right value; and the literature supports low temperature as a *variance* reducer even where it does not
-> support it as an accuracy lever [OUYANG24, RENZE24]. *Reverses if:* your own sweep shows payload
+> support it as an accuracy lever [[OUYANG24](#src-ouyang24), [RENZE24](#src-renze24)]. *Reverses if:* your own sweep shows payload
 > variance is flat across the range **and** readers prefer warmer phrasing — the honest negative result,
 > in which case revert to whatever you like and delete the matrix from your system, not just from your
 > concern list.
@@ -514,10 +523,16 @@ Six findings decide LogiTrack's sampling policy:
 generation; `0.3` for grounded synthesis over evidence; `0.8` for candidate-sub-question diversification,
 with deduplication downstream. `response_mode="compact"` retained for the extraction path at n=6 (one
 call); `tree_summarize` selected for the aggregate path; `num_output=1024` reserved out of the window with
-the evidence budget computed as the remainder in the correct tokenizer [LI-LLM]. Every extraction output
+the evidence budget computed as the remainder in the correct tokenizer [[LI-LLM]](#src-li-llm). Every extraction output
 passes through a numeric validator checking the figure appears verbatim in the assembled context — because
 `temperature=0` reduces variance and does not guarantee correctness, and because the worst sample of a
 five-run set is still a sample a user might receive.
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — the verbatim validator is only as good as the text the parser produced.
+> - If clause 7.2 came from OCR of a scanned page, the "3.5%" in context may already be a misread; the validator then confirms a wrong figure.
+> - Keep page number and parse source (text layer vs OCR vs table extractor) as node metadata, so a number traces back to its page (→ [M12](../12-grounding-and-citations/README.md)).
+> - Flag extraction answers built from OCR'd or table-extracted nodes for review instead of trusting `temperature=0` alone.
+> - Measure the parser's digit error rate in eval, separate from answer variance (→ [M13](../13-evaluation/README.md), [M14](../14-ingestion-at-scale/README.md)).
 
 ---
 
@@ -531,11 +546,11 @@ temperature works.
 
 1. **Compute the evidence budget arithmetically.** Write `context_window`, `num_output`, and the measured
    token cost of your system prompt + question + template scaffolding *in the tokenizer that matches your
-   model* [LI-LLM]. Subtract; state the evidence budget in tokens and therefore in chunks at your M3 chunk
+   model* [[LI-LLM]](#src-li-llm). Subtract; state the evidence budget in tokens and therefore in chunks at your M3 chunk
    size. If `num_output` was chosen by taste, say so — and note its failure mode (a truncated *answer*) is
    different from the evidence budget's (missing evidence).
 2. **Justify `response_mode` by call count, not reputation.** Write the LLM calls per query for your mode
-   at your own $N$ [LI-RS]. If you are on the default, name it: `compact` is a *refine chain* [LI-RM], and a
+   at your own $N$ [[LI-RS]](#src-li-rs). If you are on the default, name it: `compact` is a *refine chain* [[LI-RM]](#src-li-rm), and a
    team that has not chosen a mode has not chosen a cost.
 3. **Classify outputs by *what checks them*, then assign temperature.** For each class, state whether the
    output is (a) machine-validated, (b) read by a human and acted on, or (c) read as prose. Assign 0 for
@@ -550,7 +565,7 @@ temperature works.
 5. **State the revert condition, and list what you no longer delegate to the prompt.** The temperature you
    keep is the one your sweep supports; write the threshold that reverts it. Then list every constraint
    currently expressed *only* as prompt text and mark which must move into code — because the instruction
-   hierarchy is a model property [INSTRHIER24], not something you can configure.
+   hierarchy is a model property [[INSTRHIER24]](#src-instrhier24), not something you can configure.
 
 **Why this exercise matters.** This is the module where the two halves of "generation" — what the model
 *sees* and how it *samples* — turn out to be one decision, and where the course's central claim is easiest
@@ -559,7 +574,7 @@ engineer who can produce this ADR has done three things no dashboard does — co
 instead of inheriting it, chosen a synthesis mode by its call count instead of its default, and replaced a
 folklore temperature with a measured variance table per output class. Note what the worked example refuses
 to tell you: what temperature to use. It cannot, because Renze & Guven's negative result may hold for your
-task too [RENZE24] — and the only way to know is five repeats and a look at the payload column rather than
+task too [[RENZE24]](#src-renze24) — and the only way to know is five repeats and a look at the payload column rather than
 the mean.
 
 ---
@@ -572,10 +587,10 @@ the mean.
   five prompt-engineering techniques" from 0.0 to 1.6 and conclude that *"Despite anecdotal reports to the
   contrary, our empirical results indicate that changes in temperature from 0.0 to 1.0 do not have a
   statistically significant impact on LLM performance for problem-solving tasks. In addition, these results
-  appear to generalize across LLMs, prompt-engineering techniques, and problem domains."* [RENZE24]
+  appear to generalize across LLMs, prompt-engineering techniques, and problem domains."* [[RENZE24]](#src-renze24)
   **What to change:** stop asserting that low temperature improves accuracy; on problem-solving benchmarks
   it demonstrably does not. Replace it with the two claims the evidence *does* support — temperature is a
-  **variance** parameter [OUYANG24], and variance is what matters when the output is a **verbatim copy**
+  **variance** parameter [[OUYANG24]](#src-ouyang24), and variance is what matters when the output is a **verbatim copy**
   from context rather than a selected answer from a well-separated option set. That is narrower and
   defensible, and it is what entry M11-4 is written on. The worked example's exact-match column is fiction
   and settles nothing; the shape it predicts (flat accuracy, changing payload) is a hypothesis, and the
@@ -586,34 +601,34 @@ the mean.
   *default* configuration, and with the stakes framed as this course frames them: *"Non-determinism is a
   potential menace to scientific conclusion validity. When non-determinism is high, scientific conclusions
   simply cannot be relied upon unless researchers change their behaviour to control for it in their
-  empirical analyses."* [OUYANG24] **What to change:** never claim reproducibility from a sampling
+  empirical analyses."* [[OUYANG24]](#src-ouyang24) **What to change:** never claim reproducibility from a sampling
   parameter. If you need a *stable* answer, key a cache on the assembled prompt or use a validator that
   rejects and retries — and then log the retry rate, because a validator that fires is telling you the
   prompt is not doing its job. When you *evaluate* a temperature change, Miller's framework is the right
   instrument — "conceptualizing evaluation questions as having been drawn from an unseen super-population,
   we present formulas for analyzing evaluation data, measuring differences between two models, and planning
-  an evaluation experiment" [MILLER24] — and a five-repeat sweep at one temperature pair without error bars
+  an evaluation experiment" [[MILLER24]](#src-miller24) — and a five-repeat sweep at one temperature pair without error bars
   is not an experiment.
 - **"The prompt is a control surface."** The module recommends expressing answer constraints in the system
   prompt while arguing the ones that must hold belong in code — a tension resolved only by a model property
   this course cannot configure. Wallace et al. identify the underlying vulnerability as priority confusion
   — "LLMs often consider system prompts … to be the same priority as text from untrusted users and third
   parties" — and their remedy is *training* an instruction hierarchy that "explicitly defines how models
-  should behave when instructions of different priorities conflict" [INSTRHIER24]. **What to change:** treat
+  should behave when instructions of different priorities conflict" [[INSTRHIER24]](#src-instrhier24). **What to change:** treat
   "the model follows the system prompt over retrieved text" as an untested assumption about your specific
   model version, not a documented guarantee. Anything that must hold goes in a validator. This is the
   quality-side reading of a security finding whose adversarial reading **M21** owns.
 - **"`refine`/`compact` produces better answers than one stuffed prompt."** The framework documents `refine`
-  as one LLM call per node and as "Good for more detailed answers" [LI-RS], and the mechanism has real
-  literature behind it [ITERRETGEN23]. The counter-consideration is structural, and this module states it
+  as one LLM call per node and as "Good for more detailed answers" [[LI-RS]](#src-li-rs), and the mechanism has real
+  literature behind it [[ITERRETGEN23]](#src-iterretgen23). The counter-consideration is structural, and this module states it
   without a citation because no source here measures it: `refine` conditions each step on the previous
-  *answer* with a template that instructs the model to "update or repeat the existing answer" [LI-PROMPTP],
+  *answer* with a template that instructs the model to "update or repeat the existing answer" [[LI-PROMPTP]](#src-li-promptp),
   making the chain a Markov process over its own output. A correct answer at step 1 can be refined away by
   step 4, and re-asking does not detect it. **What to change:** measure per-mode answer *correctness*, not
   per-mode *detail*, before adopting `refine` for a task where an early chunk already contains the answer.
   Recorded as an argued mechanism, not a finding.
 - **Thin documentation, stated plainly.** The reference stack's own examples use `temperature=0.1` and never
-  `0.0` [LI-SET, LI-LLMC], so the framework demonstrates **no practice** for the zero-temperature regime this
+  `0.0` [[LI-SET](#src-li-set), [LI-LLMC](#src-li-llmc)], so the framework demonstrates **no practice** for the zero-temperature regime this
   module argues for on extraction. And the ordering of temperature rescaling versus top-p/top-k truncation —
   whether truncation is applied before or after the division — **is not specified on any page fetched for
   this module**; the mechanism above is argued from what truncation and rescaling *are*, and is flagged as
@@ -623,24 +638,24 @@ the mean.
 
 ## Sources
 
-- [Response Synthesizer](https://developers.llamaindex.ai/python/framework/module_guides/querying/response_synthesizers/) — `[LI-RS]` · owns the synthesizer's placement after postprocessors, every `response_mode`'s mechanism and call pattern, `structured_answer_filtering`, and custom templates with call-time variables.
-- [Response Modes](https://developers.llamaindex.ai/python/framework/module_guides/deploying/query_engine/response_modes/) — `[LI-RM]` · owns the mode list restated in the query-engine guide, including `compact` as the documented default.
-- [Query Engine](https://developers.llamaindex.ai/python/framework/module_guides/deploying/query_engine/) — `[LI-QA]` · owns `index.as_query_engine()` and the query-engine configuration surface the response mode is set through.
-- [Prompts](https://developers.llamaindex.ai/python/framework/module_guides/models/prompts/) — `[LI-PROMPT]` · owns the template classes and the copy-the-default-prompt guidance.
-- [Prompt Usage Pattern](https://developers.llamaindex.ai/python/framework/module_guides/models/prompts/usage_pattern/) — `[LI-PROMPTP]` · owns `text_qa_template`/`refine_template` semantics, `get_prompts`/`update_prompts` with namespaced keys, system-role templates, and the equivalence of high- and low-level prompt overrides.
-- [Configuring Settings](https://developers.llamaindex.ai/python/framework/module_guides/supporting_modules/settings/) — `[LI-SET]` · owns `Settings.context_window` and `Settings.num_output` as the prompt-helper budget, and the `temperature=0.1` example.
-- [Using LLMs](https://developers.llamaindex.ai/python/framework/module_guides/models/llms/) — `[LI-LLM]` · owns the global-tokenizer default (`cl100k` from tiktoken), the instruction to change it when you change models "to ensure accurate token counts, chunking, and prompting", and the `Settings.llm` pattern.
-- [Customizing LLMs within LlamaIndex Abstractions](https://developers.llamaindex.ai/python/framework/module_guides/models/llms/usage_custom/) — `[LI-LLMC]` · owns the `OpenAI(temperature=0.1, model="gpt-4o-mini")` example and per-module LLM override.
-- [Anthropic](https://developers.llamaindex.ai/python/framework/integrations/llm/anthropic/) — `[LI-ANTHROPIC]` · owns the verified provider constraint that extended thinking requires `temperature=1.0`, and the tokenizer-change instruction for non-OpenAI models.
-- *Lost in the Middle: How Language Models Use Long Contexts* — Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, Percy Liang · arXiv:2307.03172 (TACL 2023) · [arxiv.org/abs/2307.03172](https://arxiv.org/abs/2307.03172) — `[LITM23]` · **M9 owns this claim and its survey.** M11 cites the key only for its assembly-time application: the *position* of assembled evidence changes how much of it the model uses, which is why the fill order of the evidence budget is a decision rather than a detail. · entry mirrored for local self-containment; **M9** owns the survey.
-- *On Calibration of Modern Neural Networks* — Chuan Guo, Geoff Pleiss, Yu Sun, Kilian Q. Weinberger · arXiv:1706.04599 (ICML 2017) · [arxiv.org/abs/1706.04599](https://arxiv.org/abs/1706.04599) — `[GUO17]` · owns the logit-rescaling-before-softmax form and the finding that "temperature scaling — a single-parameter variant of Platt Scaling — is surprisingly effective at calibrating predictions". **Scope caveat:** their $T$ is *fitted* for calibration; sampling temperature *sets* the same parameter for diversity.
-- *The Effect of Sampling Temperature on Problem Solving in Large Language Models* — Matthew Renze, Erhan Guven · arXiv:2402.05201 (Findings of EMNLP 2024, pp. 7346–7356) · [arxiv.org/abs/2402.05201](https://arxiv.org/abs/2402.05201) — `[RENZE24]` · owns the negative result that temperature changes from 0.0 to 1.0 have no statistically significant effect on problem-solving performance across nine LLMs, five prompting techniques, and multiple domains. This paper is why the task matrix is a hypothesis.
-- *An Empirical Study of the Non-determinism of ChatGPT in Code Generation* — Shuyin Ouyang, Jie M. Zhang, Mark Harman, Meng Wang · arXiv:2308.02828 (2024) · [arxiv.org/abs/2308.02828](https://arxiv.org/abs/2308.02828) — `[OUYANG24]` · owns the measured non-determinism rates and the result that temperature 0 reduces but does not eliminate non-determinism.
-- *Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations* — Evan Miller · arXiv:2411.00640 (2024) · [arxiv.org/abs/2411.00640](https://arxiv.org/abs/2411.00640) — `[MILLER24]` · owns the experiment-design framing of evaluations and the formulas for measuring differences and planning sample sizes — the instrument the variance protocol needs.
-- *Enhancing Retrieval-Augmented Large Language Models with Iterative Retrieval-Generation Synergy* — Zhihong Shao, Yeyun Gong, Yelong Shen, Minlie Huang, Nan Duan, Weizhu Chen · arXiv:2305.15294 (2023) · [arxiv.org/abs/2305.15294](https://arxiv.org/abs/2305.15294) — `[ITERRETGEN23]` · owns the iterative retrieval-generation mechanism `refine` implements, and the reason an earlier answer conditions a later one.
-- *Recursively Summarizing Books with Human Feedback* — Jeff Wu, Long Ouyang, Daniel M. Ziegler, Nisan Stiennon, Ryan Lowe, Jan Leike, Paul Christiano · arXiv:2109.10862 (2021) · [arxiv.org/abs/2109.10862](https://arxiv.org/abs/2109.10862) — `[RECURSIVE21]` · owns recursive summarize-the-summaries, the mechanism behind `tree_summarize`, and its book-length evaluation.
-- *Retrieval Augmented Generation and Representative Vector Summarization for large unstructured textual data in Medical Education* — S. S. Manathunga, Y. A. Illangasekara · arXiv:2308.00479 (2023) · [arxiv.org/abs/2308.00479](https://arxiv.org/abs/2308.00479) — `[LONGFORM23]` · owns a combined extractive and abstractive summarization method using representative vectors, applied to domain RAG. **Syllabus label mismatch:** the blueprint labelled this key "long-form RAG response synthesis"; the paper's contribution is the narrower domain summarization method above, cited here for what it actually owns.
-- *The Instruction Hierarchy: Training LLMs to Prioritize Privileged Instructions* — Eric Wallace, Kai Xiao, Reimar Leike, Lilian Weng, Johannes Heidecke, Alex Beutel · arXiv:2404.13208 (2024) · [arxiv.org/abs/2404.13208](https://arxiv.org/abs/2404.13208) — `[INSTRHIER24]` · owns the finding that LLMs treat system prompts and untrusted third-party text as the same priority, and the training-based remedy. **M21 owns the adversarial attack surface**; M11 cites the precedence property only.
+- <a id="src-li-rs"></a>[Response Synthesizer](https://developers.llamaindex.ai/python/framework/module_guides/querying/response_synthesizers/) — `[LI-RS]` · owns the synthesizer's placement after postprocessors, every `response_mode`'s mechanism and call pattern, `structured_answer_filtering`, and custom templates with call-time variables.
+- <a id="src-li-rm"></a>[Response Modes](https://developers.llamaindex.ai/python/framework/module_guides/deploying/query_engine/response_modes/) — `[LI-RM]` · owns the mode list restated in the query-engine guide, including `compact` as the documented default.
+- <a id="src-li-qa"></a>[Query Engine](https://developers.llamaindex.ai/python/framework/module_guides/deploying/query_engine/) — `[LI-QA]` · owns `index.as_query_engine()` and the query-engine configuration surface the response mode is set through.
+- <a id="src-li-prompt"></a>[Prompts](https://developers.llamaindex.ai/python/framework/module_guides/models/prompts/) — `[LI-PROMPT]` · owns the template classes and the copy-the-default-prompt guidance.
+- <a id="src-li-promptp"></a>[Prompt Usage Pattern](https://developers.llamaindex.ai/python/framework/module_guides/models/prompts/usage_pattern/) — `[LI-PROMPTP]` · owns `text_qa_template`/`refine_template` semantics, `get_prompts`/`update_prompts` with namespaced keys, system-role templates, and the equivalence of high- and low-level prompt overrides.
+- <a id="src-li-set"></a>[Configuring Settings](https://developers.llamaindex.ai/python/framework/module_guides/supporting_modules/settings/) — `[LI-SET]` · owns `Settings.context_window` and `Settings.num_output` as the prompt-helper budget, and the `temperature=0.1` example.
+- <a id="src-li-llm"></a>[Using LLMs](https://developers.llamaindex.ai/python/framework/module_guides/models/llms/) — `[LI-LLM]` · owns the global-tokenizer default (`cl100k` from tiktoken), the instruction to change it when you change models "to ensure accurate token counts, chunking, and prompting", and the `Settings.llm` pattern.
+- <a id="src-li-llmc"></a>[Customizing LLMs within LlamaIndex Abstractions](https://developers.llamaindex.ai/python/framework/module_guides/models/llms/usage_custom/) — `[LI-LLMC]` · owns the `OpenAI(temperature=0.1, model="gpt-4o-mini")` example and per-module LLM override.
+- <a id="src-li-anthropic"></a>[Anthropic](https://developers.llamaindex.ai/python/framework/integrations/llm/anthropic/) — `[LI-ANTHROPIC]` · owns the verified provider constraint that extended thinking requires `temperature=1.0`, and the tokenizer-change instruction for non-OpenAI models.
+- <a id="src-litm23"></a>*Lost in the Middle: How Language Models Use Long Contexts* — Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, Percy Liang · arXiv:2307.03172 (TACL 2023) · [arxiv.org/abs/2307.03172](https://arxiv.org/abs/2307.03172) — `[LITM23]` · **M9 owns this claim and its survey.** M11 cites the key only for its assembly-time application: the *position* of assembled evidence changes how much of it the model uses, which is why the fill order of the evidence budget is a decision rather than a detail. · entry mirrored for local self-containment; **M9** owns the survey.
+- <a id="src-guo17"></a>*On Calibration of Modern Neural Networks* — Chuan Guo, Geoff Pleiss, Yu Sun, Kilian Q. Weinberger · arXiv:1706.04599 (ICML 2017) · [arxiv.org/abs/1706.04599](https://arxiv.org/abs/1706.04599) — `[GUO17]` · owns the logit-rescaling-before-softmax form and the finding that "temperature scaling — a single-parameter variant of Platt Scaling — is surprisingly effective at calibrating predictions". **Scope caveat:** their $T$ is *fitted* for calibration; sampling temperature *sets* the same parameter for diversity.
+- <a id="src-renze24"></a>*The Effect of Sampling Temperature on Problem Solving in Large Language Models* — Matthew Renze, Erhan Guven · arXiv:2402.05201 (Findings of EMNLP 2024, pp. 7346–7356) · [arxiv.org/abs/2402.05201](https://arxiv.org/abs/2402.05201) — `[RENZE24]` · owns the negative result that temperature changes from 0.0 to 1.0 have no statistically significant effect on problem-solving performance across nine LLMs, five prompting techniques, and multiple domains. This paper is why the task matrix is a hypothesis.
+- <a id="src-ouyang24"></a>*An Empirical Study of the Non-determinism of ChatGPT in Code Generation* — Shuyin Ouyang, Jie M. Zhang, Mark Harman, Meng Wang · arXiv:2308.02828 (2024) · [arxiv.org/abs/2308.02828](https://arxiv.org/abs/2308.02828) — `[OUYANG24]` · owns the measured non-determinism rates and the result that temperature 0 reduces but does not eliminate non-determinism.
+- <a id="src-miller24"></a>*Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations* — Evan Miller · arXiv:2411.00640 (2024) · [arxiv.org/abs/2411.00640](https://arxiv.org/abs/2411.00640) — `[MILLER24]` · owns the experiment-design framing of evaluations and the formulas for measuring differences and planning sample sizes — the instrument the variance protocol needs.
+- <a id="src-iterretgen23"></a>*Enhancing Retrieval-Augmented Large Language Models with Iterative Retrieval-Generation Synergy* — Zhihong Shao, Yeyun Gong, Yelong Shen, Minlie Huang, Nan Duan, Weizhu Chen · arXiv:2305.15294 (2023) · [arxiv.org/abs/2305.15294](https://arxiv.org/abs/2305.15294) — `[ITERRETGEN23]` · owns the iterative retrieval-generation mechanism `refine` implements, and the reason an earlier answer conditions a later one.
+- <a id="src-recursive21"></a>*Recursively Summarizing Books with Human Feedback* — Jeff Wu, Long Ouyang, Daniel M. Ziegler, Nisan Stiennon, Ryan Lowe, Jan Leike, Paul Christiano · arXiv:2109.10862 (2021) · [arxiv.org/abs/2109.10862](https://arxiv.org/abs/2109.10862) — `[RECURSIVE21]` · owns recursive summarize-the-summaries, the mechanism behind `tree_summarize`, and its book-length evaluation.
+- <a id="src-longform23"></a>*Retrieval Augmented Generation and Representative Vector Summarization for large unstructured textual data in Medical Education* — S. S. Manathunga, Y. A. Illangasekara · arXiv:2308.00479 (2023) · [arxiv.org/abs/2308.00479](https://arxiv.org/abs/2308.00479) — `[LONGFORM23]` · owns a combined extractive and abstractive summarization method using representative vectors, applied to domain RAG. **Syllabus label mismatch:** the blueprint labelled this key "long-form RAG response synthesis"; the paper's contribution is the narrower domain summarization method above, cited here for what it actually owns.
+- <a id="src-instrhier24"></a>*The Instruction Hierarchy: Training LLMs to Prioritize Privileged Instructions* — Eric Wallace, Kai Xiao, Reimar Leike, Lilian Weng, Johannes Heidecke, Alex Beutel · arXiv:2404.13208 (2024) · [arxiv.org/abs/2404.13208](https://arxiv.org/abs/2404.13208) — `[INSTRHIER24]` · owns the finding that LLMs treat system prompts and untrusted third-party text as the same priority, and the training-based remedy. **M21 owns the adversarial attack surface**; M11 cites the precedence property only.
 
 **Unsupported (synthetic, unverified, or derived in-file, with no located source):** the LogiTrack corpus,
 the 180-query evaluation set, the two worked-example classes and every number in both tables (exact-match,
@@ -650,13 +665,13 @@ presented in the module as an **explicit hypothesis**, and no source located for
 per-class values. The claim that **some LLM providers expose a `seed` parameter and others do not is not
 verified here** — no provider API reference was fetched for this module, and the only provider-specific
 sampling constraint that *was* fetched and verified is Anthropic's extended-thinking requirement that
-`temperature=1.0` [LI-ANTHROPIC]. The statement that top-p/top-k truncation is applied to the
+`temperature=1.0` [[LI-ANTHROPIC]](#src-li-anthropic). The statement that top-p/top-k truncation is applied to the
 temperature-scaled distribution — and therefore that truncation can render temperature partially inert — is
 a mechanism argued in-file from what truncation and rescaling are; **no fetched page specifies the order of
 these operations.** The claim that `refine`'s "update or repeat" wording can refine a correct answer into a
-wrong one is argued from the template's documented text [LI-PROMPTP] and the iterative mechanism
-[ITERRETGEN23]; it is not measured here. The three stated reasons greedy decoding is not deterministic are a
-mechanism argument — only the empirical consequence is sourced [OUYANG24], and the specific roles of
+wrong one is argued from the template's documented text [[LI-PROMPTP]](#src-li-promptp) and the iterative mechanism
+[[ITERRETGEN23]](#src-iterretgen23); it is not measured here. The three stated reasons greedy decoding is not deterministic are a
+mechanism argument — only the empirical consequence is sourced [[OUYANG24]](#src-ouyang24), and the specific roles of
 batching, kernel choice, and quantization are argued, not cited.
 
 **Verification note:** 🟡 *pending* — Step 7 (memory-less logic review) and Step 8 (literature

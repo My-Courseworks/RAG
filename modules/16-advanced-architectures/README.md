@@ -23,7 +23,7 @@ an EU ADR amendment summary. The answer it produces is a faithful, well-cited, e
 what those six chunks say.
 
 It is also useless. The question is not a retrieval question. It is a **global aggregation over the
-whole corpus**: twelve carriers, forty jurisdictions, 480,000 documents, and an answer that only exists
+whole corpus**: twelve carriers, forty jurisdictions, [480,000 documents](../../syllabus.md#corpus-scale), and an answer that only exists
 after you have read all of it and compared. No value of `similarity_top_k` answers it, because the
 answer is not in any chunk — it is a property of the *set*. The retriever did its job perfectly, and the
 architecture was the wrong shape for the question.
@@ -64,6 +64,11 @@ The opening scene is in row four. Row four is the only row where the graph archi
 overkill — and it is also the row where a **structured store** may beat it outright, which is the
 decision M8/M10 flagged and this module has to resolve.
 
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — whether a question takes the table route depends on table extraction.
+> - XLSX/HTML rate tables load as rows easily. DG surcharge tables inside carrier-agreement PDFs need table extraction first ([M3](../03-parsing-and-chunking/README.md)).
+> - If PDF tables get parsed as plain text only, the text-to-SQL route is closed. The question then ends up at the graph by accident, not by design.
+> - Keep the source page and table ID on every extracted row, so a SQL answer can still cite its source ([M12](../12-grounding-and-citations/README.md)).
+
 ```mermaid
 flowchart TD
     A[Question arrives] --> B{Answer lives in<br/>any single span?}
@@ -97,19 +102,19 @@ them confused is how teams ship a prompt loop and call it a paper.
 
 **Self-RAG** trains a single LM to emit **reflection tokens** — special tokens that decide *whether to
 retrieve* and *whether the retrieved passage supports the generation* — so that "the LM itself decides
-when retrieval is needed and critiques its own output" [SELFRAG23]. The paper's own framing is that
+when retrieval is needed and critiques its own output" [[SELFRAG23]](#src-selfrag23). The paper's own framing is that
 these are *learned* control tokens: "Our framework trains a single arbitrary LM that adaptively retrieves
 passages on-demand, and generates and reflects on retrieved passages and its own generations using
-special tokens, called reflection tokens" [SELFRAG23]. The mechanism is a **fine-tuning** intervention.
+special tokens, called reflection tokens" [[SELFRAG23]](#src-selfrag23). The mechanism is a **fine-tuning** intervention.
 A prompt-only "rate your answer 1–5 and retry" loop is a *cousin* of Self-RAG, not an implementation of
 it, and the paper provides no evidence for the cousin.
 
 **CRAG** keeps the generator frozen and adds a lightweight **retrieval evaluator** that scores the
 retrieved set and picks an action — correct, ambiguous, or incorrect — with a decompose-then-recompose
-step that filters irrelevant content out of the retrieved documents [CRAG24]. Its remediation for bad
+step that filters irrelevant content out of the retrieved documents [[CRAG24]](#src-crag24). Its remediation for bad
 retrieval is notable and, for a private corpus, disqualifying: "Since retrieval from static and limited
 corpora can only return sub-optimal documents, large-scale web searches are utilized as an extension for
-augmenting the retrieval results" [CRAG24]. LogiTrack cannot send a client's customs question to a web
+augmenting the retrieval results" [[CRAG24]](#src-crag24). LogiTrack cannot send a client's customs question to a web
 search, and its corpus is jurisdiction-restricted by contract. The *architecture* — score the retrieved
 set, branch on the score — transfers. The *remedy* does not, which means the CRAG-style loop needs a
 different fallback: broaden retrieval within scope (M6 filters relaxed to the maximum the ACL allows),
@@ -117,14 +122,14 @@ escalate to a human, or abstain (→ M12's abstention as a first-class outcome).
 
 | Family member | What is frozen vs trained | Trigger signal | Fallback action | Transfers to a private corpus? |
 |---|---|---|---|---|
-| Self-RAG | LM is **trained** to emit reflection tokens [SELFRAG23] | Learned retrieve/critique tokens | Re-retrieve, or suppress unsupported output | Only with a fine-tuning budget (→ M15's cost/benefit frame) |
-| CRAG | LM frozen; a small evaluator scores the retrieved set [CRAG24] | Confidence degree over the retrieved documents | Web search + decompose-then-recompose filter [CRAG24] | Architecture yes; **web-search fallback no** |
+| Self-RAG | LM is **trained** to emit reflection tokens [[SELFRAG23]](#src-selfrag23) | Learned retrieve/critique tokens | Re-retrieve, or suppress unsupported output | Only with a fine-tuning budget (→ M15's cost/benefit frame) |
+| CRAG | LM frozen; a small evaluator scores the retrieved set [[CRAG24]](#src-crag24) | Confidence degree over the retrieved documents | Web search + decompose-then-recompose filter [[CRAG24]](#src-crag24) | Architecture yes; **web-search fallback no** |
 | Prompt-only self-critique | Nothing trained | An LLM judge prompt | Retry, rewrite, or abstain | Yes — but unsupported by either paper |
 
 > **LlamaIndex at a glance:** the framework does not ship a Self-RAG or CRAG class. Both are
 > *compositions*: a retrieval evaluator is a `NodePostprocessor`-shaped scoring step, the branch is
 > application control flow, and the retry is a second call to the same query engine. The docs' posture
-> is that agents are "any system with LLM decision making in the process" [LI-AG] — which is exactly
+> is that agents are "any system with LLM decision making in the process" [[LI-AG]](#src-li-ag) — which is exactly
 > the license, and exactly the risk, because nothing in the framework forces you to bound the loop.
 
 ### Graph RAG and community summarization: the indexing bill arrives first
@@ -132,7 +137,7 @@ escalate to a human, or abstain (→ M12's abstention as a first-class outcome).
 GraphRAG's contribution is a two-stage LLM-built index: "first, to derive an entity knowledge graph from
 the source documents, then to pregenerate community summaries for all groups of closely related
 entities," after which a query generates a partial response per community summary and then summarizes
-the partials [GRAPHRAG24]. That second stage is why global questions become answerable: the aggregate
+the partials [[GRAPHRAG24]](#src-graphrag24). That second stage is why global questions become answerable: the aggregate
 work is done **at index time**, and the query only reads its results.
 
 That is also the cost. Extraction is an LLM call per chunk, and community summarization is an LLM call
@@ -141,11 +146,11 @@ part, on every corpus change (→ M14's incremental-sync problem, applied to a s
 incrementally friendly than a vector index).
 
 Price it before building it. `PropertyGraphIndex` construction runs a series of `kg_extractors` over each
-chunk and attaches the extracted entities and relations as metadata on the node [LI-PG]. The default
+chunk and attaches the extracted entities and relations as metadata on the node [[LI-PG]](#src-li-pg). The default
 extractors are `SimpleLLMPathExtractor`, which "extract[s] short statements using an LLM to prompt and
 parse single-hop paths in the format (`entity1`, `relation`, `entity2`)", and `ImplicitPathExtractor`,
 which reads relationships that already exist on the node and "does not need an LLM or embedding model to
-run" [LI-PG]. `SimpleLLMPathExtractor` exposes `max_paths_per_chunk` and `num_workers` [LI-PG] — the
+run" [[LI-PG]](#src-li-pg). `SimpleLLMPathExtractor` exposes `max_paths_per_chunk` and `num_workers` [[LI-PG]](#src-li-pg) — the
 first is your output-token bill, the second is your wall clock, and neither is your quality knob.
 
 | Extraction stage | Volume at LogiTrack month 12 | Tokens | Price at the M18 assumption ($3.00 / $15.00 per 1M in/out) |
@@ -159,17 +164,24 @@ rate, **under $110**. The graph index is roughly **250×** the embedding cost of
 That ratio is the decision — not the retrieval quality it buys. Whether the ratio can be improved is
 where the literature is genuinely split (see "Where the literature disagrees"), and the honest answer is
 that **the cost is a design variable, not a constant**: extraction scope, chunk granularity, and
-schema-constrained extractors all move it by an order of magnitude or more [KETRAG25].
+schema-constrained extractors all move it by an order of magnitude or more [[KETRAG25]](#src-ketrag25).
 
 `SchemaLLMPathExtractor` is the lever most teams miss. It extracts "paths following a strict schema of
 allowed entities, relationships, and which entities can be connected to which relationships," using
 "pydantic, structured outputs from LLMs, and some clever validation," and it is tunable through
 `possible_entities`, `possible_relations`, `kg_validation_schema`, `strict`, `max_triplets_per_chunk`, and
-`raise_on_error` [LI-PG]. A schema is a *cost ceiling with a domain prior in it*, and it is also the
+`raise_on_error` [[LI-PG]](#src-li-pg). A schema is a *cost ceiling with a domain prior in it*, and it is also the
 production-safety switch: `raise_on_error=True` makes extraction failures crash the pipeline rather than
-being "swallowed and logged (default)" [LI-PG]. Ingesting a 480k-document corpus with the default and
+being "swallowed and logged (default)" [[LI-PG]](#src-li-pg). Ingesting a 480k-document corpus with the default and
 never noticing that 3% of extractions silently failed is a quiet way to end up with a graph that is
 missing exactly the entities your global questions aggregate over.
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — the graph only knows what parsing turned into text.
+> - `kg_extractors` run on each chunk ([LI-PG](https://developers.llamaindex.ai/python/framework/module_guides/indexing/lpg_index_guide/)). A surcharge table, a stamp or a scanned annex gets into the graph only as M3's text ([M3](../03-parsing-and-chunking/README.md)).
+> - A table flattened to prose gives wrong triples: carrier, UN number and surcharge end up in the wrong pairs.
+> - OCR'd pages and vision-model figure descriptions add nodes, and each node is one more extraction call.
+>   - Count them in chunks per document before you price the build ([M14](../14-ingestion-at-scale/README.md), [M18](../18-cost-and-latency/README.md)).
+> - Page-image retrieval (e.g. [ColPali](https://arxiv.org/abs/2407.01449)) skips text extraction. It is deferred ([syllabus](../../syllabus.md#1-scope-knobs-frozen)).
 
 > **Tradeoff (the ledger entry M16-1).** *Decision:* build and maintain a property graph with
 > schema-constrained extraction, and route global/aggregate questions to community summaries.
@@ -186,7 +198,7 @@ Three cheap members of the family are routinely confused with the expensive ones
 almost always right.
 
 **Adaptive retrieval** means deciding *whether* to retrieve at all, and how much. This is Self-RAG's
-headline capability [SELFRAG23], and it is also implementable as a router: classify the query, then send
+headline capability [[SELFRAG23]](#src-selfrag23), and it is also implementable as a router: classify the query, then send
 it down a cheap path (no retrieval, answer from the parametric model), a medium path (single retrieval),
 or an expensive path (decomposition, graph, agent). Routing is the highest-return advanced technique in
 this module because it is the only one whose main effect is *spending less*.
@@ -200,34 +212,34 @@ prevents by roughly 15×.
 **Decomposition** is where cost stops being linear. `SubQuestionQueryEngine` is the documented shape: it
 "first breaks down the complex query into sub questions for each relevant data source, then gather[s] all
 the intermediate responses and synthesizes a final response," given a set of `QueryEngineTool`s each
-wrapping a query engine with `ToolMetadata` [LI-SQ]. The documented trace makes the cost structure
+wrapping a query engine with `ToolMetadata` [[LI-SQ]](#src-li-sq). The documented trace makes the cost structure
 explicit: one query decomposed into 3 sub-questions produced a `SUB_QUESTION` event per sub-question,
 each containing a full nested `QUERY` → `RETRIEVE` → `SYNTHESIZE` subtree, plus a final `SYNTHESIZE`
-[LI-SQ]. **Sub-questions multiply, they do not divide.** Four sub-questions means four retrievals, four
+[[LI-SQ]](#src-li-sq). **Sub-questions multiply, they do not divide.** Four sub-questions means four retrievals, four
 syntheses, and a fifth synthesis over the results.
 
 > **LlamaIndex at a glance:** `SubQuestionQueryEngine.from_defaults(query_engine_tools=..., use_async=True)`
-> over `QueryEngineTool(query_engine=..., metadata=ToolMetadata(name=..., description=...))` [LI-SQ].
+> over `QueryEngineTool(query_engine=..., metadata=ToolMetadata(name=..., description=...))` [[LI-SQ]](#src-li-sq).
 > The `use_async=True` in the docs' own example is a latency decision disguised as a parameter — the
-> documented serial trace shows one sub-question consuming 62.4 s of the 66.5 s total [LI-SQ], which is
+> documented serial trace shows one sub-question consuming 62.4 s of the 66.5 s total [[LI-SQ]](#src-li-sq), which is
 > precisely the pathology `use_async` exists to prevent on a 2.5 s P95 budget.
 
 ### Agentic retrieval loops and their cost ceilings
 
 An agent, in the framework's vocabulary, is a loop: the LLM "responds either with a direct response, or a
 list of tool calls"; every tool call is executed and its result added to the chat history; the agent is
-then "invoked again with updated history, and either responds directly or selects more calls" [LI-AG].
+then "invoked again with updated history, and either responds directly or selects more calls" [[LI-AG]](#src-li-ag).
 `FunctionAgent` is the function/tool-calling instantiation, `ReActAgent` and `CodeActAgent` use different
 prompting strategies, and `AgentWorkflow` composes multiple agents that hand off control to each other
-[LI-AG] [LI-AGB]. Retrieval becomes one tool among several, and the loop decides how many times to use it.
+[[LI-AG]](#src-li-ag) [[LI-AGB]](#src-li-agb). Retrieval becomes one tool among several, and the loop decides how many times to use it.
 
 The loop is unbounded by default. Nothing in the framework caps steps, tokens, or dollars; `ChatMemoryBuffer`
-bounds *memory* (its `token_limit` default is documented at 40,000 in the docs' example [LI-AG]), which
+bounds *memory* (its `token_limit` default is documented at 40,000 in the docs' example [[LI-AG]](#src-li-ag)), which
 is a context-window guard, not a spend guard. An unbounded loop on a metered API is an unbounded bill,
 and the failure is not hypothetical: the agent-evaluation literature's central critique is precisely that
 "there is a narrow focus on accuracy without attention to other metrics. As a result, SOTA agents are
 needlessly complex and costly, and the community has reached mistaken conclusions about the sources of
-accuracy gains" [AGENTS24].
+accuracy gains" [[AGENTS24]](#src-agents24).
 
 So the design obligation is a **step budget expressed in the same unit as the SLO**: max steps, max total
 tokens, max wall clock, and a hard fallback when any is hit. Steps are the wrong unit to cap alone,
@@ -255,7 +267,7 @@ Its authors state the problem directly: "the rapid advancements are outpacing th
 paradigm, with many methods struggling to be unified under the process of 'retrieve-then-generate'," and
 they respond by "decomposing complex RAG systems into independent modules and specialized operators" and
 by identifying "prevalent RAG patterns—linear, conditional, branching, and looping—and offers a
-comprehensive analysis of their respective implementation nuances" [MODRAG24].
+comprehensive analysis of their respective implementation nuances" [[MODRAG24]](#src-modrag24).
 
 Adopt the vocabulary, because it makes cost legible. Each *pattern* has a distinct cost signature, and
 naming the pattern is how you predict the signature without profiling:
@@ -264,7 +276,7 @@ naming the pattern is how you predict the signature without profiling:
 |---|---|---|---|---|---|
 | **Linear** | retrieve → rerank → generate | 1 | 1–2 | Context size | Sum of stages; predictable |
 | **Conditional** | route, then linear | 0–1 | 1 extra (router) | Router accuracy, not tokens | **Lower** than linear on the routed-away share |
-| **Branching** | decompose, retrieve per branch, merge | N | N + 1 | N × context size | Max over branches if parallel; sum if serial [LI-SQ] |
+| **Branching** | decompose, retrieve per branch, merge | N | N + 1 | N × context size | Max over branches if parallel; sum if serial [[LI-SQ]](#src-li-sq) |
 | **Looping** | agentic, iterate until done | 1–k | 1–k | Cumulative transcript growth | Multiplicative and heavy-tailed |
 
 The last row is where the module's cost honesty lives: a looping pattern is the only one whose cost is
@@ -284,7 +296,7 @@ without it, every architecture below scores identically on a harness that cannot
 Ratings are human, 1–5, normalized to [0,1]: **faithfulness** (is every claim supported by the corpus?)
 and **comprehensiveness** (does the answer cover the entities a domain expert would expect?). Token and
 dollar columns use the M18 pricing assumptions and a blended $4.10 per 1M tokens. A query engine is the
-framework's generic "ask a question over your data" interface [LI-QE], so every row below is a query
+framework's generic "ask a question over your data" interface [[LI-QE]](#src-li-qe), so every row below is a query
 engine; what differs is how many of them run per user query.
 
 The measurement instrument matters as much as the architectures. M13's `FaithfulnessEvaluator` and
@@ -293,7 +305,7 @@ The measurement instrument matters as much as the architectures. M13's `Faithful
 context in front of it cannot detect what the whole corpus would have added. The RAGChecker framework is
 the right instrument here, because it decomposes the diagnosis into separate retrieval and generation
 metrics and its meta-evaluation reports "significantly better correlations with human judgments than
-other evaluation metrics" [RAGCHECKER24]. Use it for the global subset, and use it to decompose *which*
+other evaluation metrics" [[RAGCHECKER24]](#src-ragchecker24). Use it for the global subset, and use it to decompose *which*
 module of the architecture the gain came from — that decomposition is what tells you whether you paid
 $26,199 for extraction quality or for the summarization stage.
 
@@ -405,13 +417,13 @@ Only some of them survive the clock.
 - **"GraphRAG's quality gain justifies its indexing cost."** The GraphRAG paper reports that "for a class
   of global sensemaking questions over datasets in the 1 million token range, we show that GraphRAG leads
   to substantial improvements over a conventional RAG baseline for both the comprehensiveness and
-  diversity of generated answers" [GRAPHRAG24]. Read the scope carefully: the demonstrated improvement is
+  diversity of generated answers" [[GRAPHRAG24]](#src-graphrag24). Read the scope carefully: the demonstrated improvement is
   for **global sensemaking questions** at a **1 million token** corpus scale — roughly 750,000 words, or
-  **about a quarter of LogiTrack's pilot corpus and 1/4000th of its month-12 corpus**. The paper does not
-  claim, and does not test, that the gain holds at 4 billion tokens or on local lookup questions.
+  **about 1/18th of LogiTrack's [pilot corpus](../../syllabus.md#corpus-scale) and 1/2,900th of its year-one corpus**. The paper does not
+  claim, and does not test, that the gain holds at 2.9 billion tokens or on local lookup questions.
   Against it, KET-RAG reports the opposing result on cost: it "achieves comparable or superior retrieval
   quality to Microsoft's Graph-RAG while reducing indexing costs by over an order of magnitude," and
-  "improves the generation quality by up to 32.4% while lowering indexing costs by around 20%" [KETRAG25].
+  "improves the generation quality by up to 32.4% while lowering indexing costs by around 20%" [[KETRAG25]](#src-ketrag25).
   **What to change:** neither paper settles the question for *your* corpus, and the disagreement is not
   about whether graphs help — both agree they can — but about whether a *full* LLM-extracted knowledge
   graph is the cost-optimal structure. LogiTrack's own arithmetic (finding 3 above) shows the decision
@@ -419,7 +431,7 @@ Only some of them survive the clock.
   reported as quality gain per added dollar — is the only instrument that resolves it locally, and it
   costs an afternoon against a $26,199 build.
 - **"Self-correcting retrieval is a prompt pattern."** Self-RAG's mechanism is a trained model emitting
-  reflection tokens to decide when to retrieve and whether a passage supports the generation [SELFRAG23].
+  reflection tokens to decide when to retrieve and whether a passage supports the generation [[SELFRAG23]](#src-selfrag23).
   The published evidence is for that trained mechanism. A prompt-loop approximation is a different
   system with a different (unmeasured) reliability profile, and presenting it as "Self-RAG" in a design
   document misattributes a result. **What to change:** if you ship a prompt-level self-critique loop, name
@@ -430,15 +442,15 @@ Only some of them survive the clock.
 - **"CRAG handles retrieval failure, so we are covered."** CRAG's remedy for a bad retrieved set is
   large-scale web search, by its authors' own design: "Since retrieval from static and limited corpora can
   only return sub-optimal documents, large-scale web searches are utilized as an extension for augmenting
-  the retrieval results" [CRAG24]. For a private, contract-restricted corpus that remedy is unavailable,
+  the retrieval results" [[CRAG24]](#src-crag24). For a private, contract-restricted corpus that remedy is unavailable,
   and the paper offers no evidence about what the evaluator-and-branch architecture achieves **without**
   the web-search augmentation. **What to change:** borrow the branch, not the fallback. Then define your
   own in-scope fallback and measure *it*, because the published numbers cover a system you cannot build.
 - **"Agents are more accurate, so they are better."** The agent-benchmarking critique is blunt: "there is
   a narrow focus on accuracy without attention to other metrics. As a result, SOTA agents are needlessly
   complex and costly, and the community has reached mistaken conclusions about the sources of accuracy
-  gains" [AGENTS24]. The paper's prescription is to jointly optimize cost and accuracy rather than
-  comparing agents on accuracy alone [AGENTS24]. **What to change:** report the quality gain *per added
+  gains" [[AGENTS24]](#src-agents24). The paper's prescription is to jointly optimize cost and accuracy rather than
+  comparing agents on accuracy alone [[AGENTS24]](#src-agents24). **What to change:** report the quality gain *per added
   dollar and per added millisecond*, on the same table, every time. The M16 worked-example table is that
   prescription instantiated — the agent row wins one column and loses two, and the table is what makes
   that visible instead of arguable.
@@ -447,20 +459,20 @@ Only some of them survive the clock.
 
 ## Sources
 
-- [Agents](https://developers.llamaindex.ai/python/framework/module_guides/deploying/agents/) — `[LI-AG]` · owns the agent abstraction, the `FunctionAgent`/`ReActAgent`/`CodeActAgent`/`AgentWorkflow` classes, the tool-call loop, `ChatMemoryBuffer`, and the framework's own definition of "agentic".
-- [Building an agent](https://developers.llamaindex.ai/python/framework/understanding/agent/) — `[LI-AGB]` · owns the step-by-step `FunctionAgent` construction, tool definition via docstrings and type hints, and the async `run` interface.
-- [Using a Property Graph Index](https://developers.llamaindex.ai/python/framework/module_guides/indexing/lpg_index_guide/) — `[LI-PG]` · owns `PropertyGraphIndex` construction, the `kg_extractors` family (`SimpleLLMPathExtractor`, `ImplicitPathExtractor`, `DynamicLLMPathExtractor`, `SchemaLLMPathExtractor`) with their parameters, the sub-retriever list (`LLMSynonymRetriever`, `VectorContextRetriever`, `TextToCypherRetriever`, `CypherTemplateRetriever`, `CustomPGRetriever`), the `raise_on_error` default, and the supported graph stores.
-- [Sub-Question Query Engine](https://developers.llamaindex.ai/python/examples/query_engine/sub_question_query_engine/) — `[LI-SQ]` · owns the decomposition interface (`SubQuestionQueryEngine.from_defaults`, `QueryEngineTool`, `ToolMetadata`), the per-sub-question nested trace, and the `SUB_QUESTION` event.
-- [Query Engine](https://developers.llamaindex.ai/python/framework/module_guides/deploying/query_engine/) — `[LI-QE]` · owns the query-engine interface that `QueryEngineTool` wraps and the module index of composable query engines.
-- *Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection* — Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, Hannaneh Hajishirzi · arXiv:2310.11511 (2023) · [arxiv.org/abs/2310.11511](https://arxiv.org/abs/2310.11511) — `[SELFRAG23]` · owns learned adaptive retrieval via reflection tokens and the trained (not prompted) nature of the mechanism.
-- *Corrective Retrieval Augmented Generation* — Shi-Qi Yan, Jia-Chen Gu, Yun Zhu, Zhen-Hua Ling · arXiv:2401.15884 (v3, 2024) · [arxiv.org/abs/2401.15884](https://arxiv.org/abs/2401.15884) — `[CRAG24]` · owns the lightweight retrieval evaluator, the confidence-triggered action branch, the decompose-then-recompose filter, and the web-search fallback.
-- *From Local to Global: A Graph RAG Approach to Query-Focused Summarization* — Darren Edge, Ha Trinh, Newman Cheng, Joshua Bradley, Alex Chao, Apurva Mody, Steven Truitt, Dasha Metropolitansky, Robert Osazuwa Ness, Jonathan Larson · arXiv:2404.16130 (v2, 2025) · [arxiv.org/abs/2404.16130](https://arxiv.org/abs/2404.16130) — `[GRAPHRAG24]` · owns LLM-built entity graphs plus pregenerated community summaries, and the scope of the reported gain (global sensemaking questions, ~1M-token corpora).
-- *Modular RAG: Transforming RAG Systems into LEGO-like Reconfigurable Frameworks* — Yunfan Gao, Yun Xiong, Meng Wang, Haofen Wang · arXiv:2407.21059 (2024) · [arxiv.org/abs/2407.21059](https://arxiv.org/abs/2407.21059) — `[MODRAG24]` · owns the modular framing and the linear / conditional / branching / looping pattern taxonomy.
-- *KET-RAG: A Cost-Efficient Multi-Granular Indexing Framework for Graph-RAG* — Yiqian Huang, Shiqi Zhang, Xiaokui Xiao · arXiv:2502.09304 (v2, 2025) · [arxiv.org/abs/2502.09304](https://arxiv.org/abs/2502.09304) — `[KETRAG25]` · owns the critical cost result against full knowledge-graph extraction and the skeleton-plus-bipartite-graph alternative.
-- *AI Agents That Matter* — Sayash Kapoor, Benedikt Stroebl, Zachary S. Siegel, Nitya Nadgir, Arvind Narayanan · arXiv:2407.01502 (2024) · [arxiv.org/abs/2407.01502](https://arxiv.org/abs/2407.01502) — `[AGENTS24]` · owns the cost-blindness critique of agent evaluation and the joint cost/accuracy prescription.
-- *RAGChecker: A Fine-grained Framework for Diagnosing Retrieval-Augmented Generation* — Dongyu Ru, Lin Qiu, Xiangkun Hu, Tianhang Zhang, Peng Shi, Shuaichen Chang, Cheng Jiayang, Cunxiang Wang, Shichao Sun, Huanyu Li, Zizhao Zhang, Binjie Wang, Jiarong Jiang, Tong He, Zhiguo Wang, Pengfei Liu, Yue Zhang, Zheng Zhang · arXiv:2408.08067 (v2, 2024) · [arxiv.org/abs/2408.08067](https://arxiv.org/abs/2408.08067) — `[RAGCHECKER24]` · owns fine-grained retrieval/generation diagnostic metrics and the meta-evaluation showing better correlation with human judgments than other metrics — the instrument that makes "quality gain per added dollar" measurable rather than anecdotal.
+- <a id="src-li-ag"></a>[Agents](https://developers.llamaindex.ai/python/framework/module_guides/deploying/agents/) — `[LI-AG]` · owns the agent abstraction, the `FunctionAgent`/`ReActAgent`/`CodeActAgent`/`AgentWorkflow` classes, the tool-call loop, `ChatMemoryBuffer`, and the framework's own definition of "agentic".
+- <a id="src-li-agb"></a>[Building an agent](https://developers.llamaindex.ai/python/framework/understanding/agent/) — `[LI-AGB]` · owns the step-by-step `FunctionAgent` construction, tool definition via docstrings and type hints, and the async `run` interface.
+- <a id="src-li-pg"></a>[Using a Property Graph Index](https://developers.llamaindex.ai/python/framework/module_guides/indexing/lpg_index_guide/) — `[LI-PG]` · owns `PropertyGraphIndex` construction, the `kg_extractors` family (`SimpleLLMPathExtractor`, `ImplicitPathExtractor`, `DynamicLLMPathExtractor`, `SchemaLLMPathExtractor`) with their parameters, the sub-retriever list (`LLMSynonymRetriever`, `VectorContextRetriever`, `TextToCypherRetriever`, `CypherTemplateRetriever`, `CustomPGRetriever`), the `raise_on_error` default, and the supported graph stores.
+- <a id="src-li-sq"></a>[Sub-Question Query Engine](https://developers.llamaindex.ai/python/examples/query_engine/sub_question_query_engine/) — `[LI-SQ]` · owns the decomposition interface (`SubQuestionQueryEngine.from_defaults`, `QueryEngineTool`, `ToolMetadata`), the per-sub-question nested trace, and the `SUB_QUESTION` event.
+- <a id="src-li-qe"></a>[Query Engine](https://developers.llamaindex.ai/python/framework/module_guides/deploying/query_engine/) — `[LI-QE]` · owns the query-engine interface that `QueryEngineTool` wraps and the module index of composable query engines.
+- <a id="src-selfrag23"></a>*Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection* — Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, Hannaneh Hajishirzi · arXiv:2310.11511 (2023) · [arxiv.org/abs/2310.11511](https://arxiv.org/abs/2310.11511) — `[SELFRAG23]` · owns learned adaptive retrieval via reflection tokens and the trained (not prompted) nature of the mechanism.
+- <a id="src-crag24"></a>*Corrective Retrieval Augmented Generation* — Shi-Qi Yan, Jia-Chen Gu, Yun Zhu, Zhen-Hua Ling · arXiv:2401.15884 (v3, 2024) · [arxiv.org/abs/2401.15884](https://arxiv.org/abs/2401.15884) — `[CRAG24]` · owns the lightweight retrieval evaluator, the confidence-triggered action branch, the decompose-then-recompose filter, and the web-search fallback.
+- <a id="src-graphrag24"></a>*From Local to Global: A Graph RAG Approach to Query-Focused Summarization* — Darren Edge, Ha Trinh, Newman Cheng, Joshua Bradley, Alex Chao, Apurva Mody, Steven Truitt, Dasha Metropolitansky, Robert Osazuwa Ness, Jonathan Larson · arXiv:2404.16130 (v2, 2025) · [arxiv.org/abs/2404.16130](https://arxiv.org/abs/2404.16130) — `[GRAPHRAG24]` · owns LLM-built entity graphs plus pregenerated community summaries, and the scope of the reported gain (global sensemaking questions, ~1M-token corpora).
+- <a id="src-modrag24"></a>*Modular RAG: Transforming RAG Systems into LEGO-like Reconfigurable Frameworks* — Yunfan Gao, Yun Xiong, Meng Wang, Haofen Wang · arXiv:2407.21059 (2024) · [arxiv.org/abs/2407.21059](https://arxiv.org/abs/2407.21059) — `[MODRAG24]` · owns the modular framing and the linear / conditional / branching / looping pattern taxonomy.
+- <a id="src-ketrag25"></a>*KET-RAG: A Cost-Efficient Multi-Granular Indexing Framework for Graph-RAG* — Yiqian Huang, Shiqi Zhang, Xiaokui Xiao · arXiv:2502.09304 (v2, 2025) · [arxiv.org/abs/2502.09304](https://arxiv.org/abs/2502.09304) — `[KETRAG25]` · owns the critical cost result against full knowledge-graph extraction and the skeleton-plus-bipartite-graph alternative.
+- <a id="src-agents24"></a>*AI Agents That Matter* — Sayash Kapoor, Benedikt Stroebl, Zachary S. Siegel, Nitya Nadgir, Arvind Narayanan · arXiv:2407.01502 (2024) · [arxiv.org/abs/2407.01502](https://arxiv.org/abs/2407.01502) — `[AGENTS24]` · owns the cost-blindness critique of agent evaluation and the joint cost/accuracy prescription.
+- <a id="src-ragchecker24"></a>*RAGChecker: A Fine-grained Framework for Diagnosing Retrieval-Augmented Generation* — Dongyu Ru, Lin Qiu, Xiangkun Hu, Tianhang Zhang, Peng Shi, Shuaichen Chang, Cheng Jiayang, Cunxiang Wang, Shichao Sun, Huanyu Li, Zizhao Zhang, Binjie Wang, Jiarong Jiang, Tong He, Zhiguo Wang, Pengfei Liu, Yue Zhang, Zheng Zhang · arXiv:2408.08067 (v2, 2024) · [arxiv.org/abs/2408.08067](https://arxiv.org/abs/2408.08067) — `[RAGCHECKER24]` · owns fine-grained retrieval/generation diagnostic metrics and the meta-evaluation showing better correlation with human judgments than other metrics — the instrument that makes "quality gain per added dollar" measurable rather than anecdotal.
 
-**Unsupported (synthetic, no located source):** the LogiTrack corpus at 480,000 documents, its 8.4-chunks-per-document average and 4,032,000 extraction calls, the 40-query global-question subset, every quality rating, token count, dollar figure, latency figure, and P95 in the worked-example table, the $26,199 build price, the "$4.10 per 1M blended tokens" figure, and all tradeoff-ledger entries. These are constructed for teaching and are not empirical findings. The extraction-token arithmetic (1,224 in / 180 out per extraction call) is derived in-file from the assumed chunk size, prompt overhead, and `max_paths_per_chunk=10`; the $3.00/$15.00 per 1M in/out prices are **assumptions, price volatile**, restated from M18 where they are declared and flagged. The claim that a chunk-derived synthetic query generator cannot express set-level questions is a mechanism argued here, not a measured result. The statement that `SubQuestionQueryEngine` sub-questions multiply rather than divide is read off the framework's own documented nested trace [LI-SQ]; the 62.4 s and 66.5 s figures quoted from that trace are the docs' example run, not a benchmark. The assertion that a looping pattern's cost is superlinear in iteration count follows from re-sending the accumulated transcript each turn and is not independently measured here.
+**Unsupported (synthetic, no located source):** the LogiTrack corpus at 480,000 documents, its 8.4-chunks-per-document average and 4,032,000 extraction calls, the 40-query global-question subset, every quality rating, token count, dollar figure, latency figure, and P95 in the worked-example table, the $26,199 build price, the "$4.10 per 1M blended tokens" figure, and all tradeoff-ledger entries. These are constructed for teaching and are not empirical findings. The extraction-token arithmetic (1,224 in / 180 out per extraction call) is derived in-file from the assumed chunk size, prompt overhead, and `max_paths_per_chunk=10`; the $3.00/$15.00 per 1M in/out prices are **assumptions, price volatile**, restated from M18 where they are declared and flagged. The claim that a chunk-derived synthetic query generator cannot express set-level questions is a mechanism argued here, not a measured result. The statement that `SubQuestionQueryEngine` sub-questions multiply rather than divide is read off the framework's own documented nested trace [[LI-SQ]](#src-li-sq); the 62.4 s and 66.5 s figures quoted from that trace are the docs' example run, not a benchmark. The assertion that a looping pattern's cost is superlinear in iteration count follows from re-sending the accumulated transcript each turn and is not independently measured here.
 
 **Verification note:** 🟡 *pending* — Step 7 (memory-less logic review) and Step 8 (literature survey) not yet run on this module.
 

@@ -56,7 +56,7 @@ measurement; verifiability is a *product* decision about what the citation is fo
 
 The literature has a name for the target of the first two. Rashkin and colleagues define a
 framework for statements "Attributable to Identified Sources (AIS)" and describe its purpose as
-"measuring whether model-generated statements are supported by underlying sources" [ATTR22].
+"measuring whether model-generated statements are supported by underlying sources" [[ATTR22]](#src-attr22).
 Read that sentence carefully, because it contains the trap this whole module is about: **AIS
 measures support by a source, not truth about the world.** A statement can be perfectly AIS-
 attributable to a document that is itself wrong, outdated, or — as in the opening scene —
@@ -88,27 +88,34 @@ ladder. Each rung buys verifiability and costs something.
 LlamaIndex implements the middle of this ladder through `CitationQueryEngine`, which is built to
 be used "with any existing index" and exposes citation granularity as a single knob: the
 notebook's inline comment reads "here we can control how granular citation sources are, the
-default is 512", with `citation_chunk_size=512` passed as an argument [LI-CQE]. The mechanism is
+default is 512", with `citation_chunk_size=512` passed as an argument [[LI-CQE]](#src-li-cqe). The mechanism is
 worth stating precisely because it is frequently misread: the engine takes the retrieved nodes and
 *re-splits them into smaller citation nodes*, so querying an index whose nodes are 1024 tokens
 with `citation_chunk_size=512` returns six source nodes rather than three — the notebook's own
 comment for the 512 case is "source nodes are 6, because the original chunks of 1024-sized nodes
-were broken into more granular nodes" [LI-CQE].
+were broken into more granular nodes" [[LI-CQE]](#src-li-cqe).
 
 Two consequences follow directly from the documented behaviour, and both are easy to get wrong:
 
 1. **Granularity is capped by the index, not by the argument.** "Note that setting the chunk size
-   larger than the original chunk size of the nodes will have no effect" [LI-CQE]. You cannot make
+   larger than the original chunk size of the nodes will have no effect" [[LI-CQE]](#src-li-cqe). You cannot make
    citations coarser than your chunks by asking; you can only make them finer. Raising citation
    granularity is a *re-indexing* decision (→ M3), and M3 already argued the point that the chunk
    is the unit of meaning.
 2. **Citation numbering is 1-based and the API is 0-based.** The notebook flags it in bold:
-   "Sources start counting at 1, but python arrays start counting at zero!" [LI-CQE]. Every
+   "Sources start counting at 1, but python arrays start counting at zero!" [[LI-CQE]](#src-li-cqe). Every
    off-by-one citation bug in a citation UI traces to this join.
 
 The rung you need is set by your reader's verification budget, not by your ambitions. A broker
 auditing a declaration will not read a 512-token chunk to find one number; a developer debugging
 a pipeline will not pay for per-claim attribution on every request.
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — on a scanned page, table or figure, the "span" rung means a region, not character offsets.
+> - Scanned page: the PDF has no text to offset into. Cite page + bounding box, and show the page crop.
+>   - Docling keeps `page_no`, `bbox` and `charspan` per extracted item ([ProvenanceItem](https://docling-project.github.io/docling/reference/docling_document/)).
+> - Table: cite table, row and column. A length-based re-split (`citation_chunk_size`) can cut rows off from their header row (→ [M3](../03-parsing-and-chunking/README.md)).
+> - Figure: a vision-model description is not in the PDF, so the reader cannot find it there. Cite the figure; label the text as generated.
+> - Which fields to keep per node → [M2](../02-rag-pipeline-end-to-end/README.md).
 
 > **Tradeoff (the ledger entry M12-2).** *Decision:* build citations at node granularity by
 > default, with a per-claim span-attribution pass reserved for the answer classes that carry
@@ -138,7 +145,7 @@ hypothetical — it is what a system does when it lacks per-claim attribution an
 "show sources". It also happens to be the failure mode ALCE was built to measure: the benchmark
 reports "automatic metrics along three dimensions — fluency, correctness, and citation quality"
 and notes that the dimensions move independently, with the headline result that "on the ELI5
-dataset, even the best models lack complete citation support 50% of the time" [ALCE23].
+dataset, even the best models lack complete citation support 50% of the time" [[ALCE23]](#src-alce23).
 
 Hold that number next to the opening scene. The best systems measured on a published citation
 benchmark leave half of their answers without complete citation support. A system that reports a
@@ -176,7 +183,7 @@ whether a particular generated statement is actually grounded in the context, a 
 or fabricated?" The method introduced is "context attribution: pinpointing the parts of the
 context (if any) that led a model to generate a particular statement", and it is described as "a
 simple and scalable method for context attribution that can be applied on top of any existing
-language model" [CTXCITE24]. Note "if any" — the method's output space includes *no supporting
+language model" [[CTXCITE24]](#src-ctxcite24). Note "if any" — the method's output space includes *no supporting
 part*, which is precisely the opening scene's diagnosis and precisely what a citation cannot
 express.
 
@@ -196,7 +203,7 @@ RAGTruth tells us how much room there is for this failure to hide. Its corpus is
 "nearly 18,000 naturally generated responses from diverse LLMs using RAG", annotated "at both the
 individual cases and word levels", and its motivating observation is blunt: "Despite the
 integration of RAG, LLMs may still present unsupported or contradictory claims to the retrieved
-contents" [RAGTRUTH24]. Word-level annotation matters here. A claim-level or answer-level
+contents" [[RAGTRUTH24]](#src-ragtruth24). Word-level annotation matters here. A claim-level or answer-level
 faithfulness score would have marked the opening scene's answer as *mostly* faithful, because most
 of the sentences really were supported; the specific failure was a single number inside one clause.
 
@@ -220,18 +227,24 @@ The tree's value is that it separates four failures that a "faithfulness score" 
 citation, unsupported citation, decorative citation, and correct-citation-wrong-corpus. Only the
 last one is fixed by better generation.
 
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — every check in the tree compares the claim to the node text, not to the page.
+> - OCR or table extraction misreads a digit: the answer is faithful to the node and wrong against the page. It passes every check above.
+> - So the "corpus is wrong" branch also covers "parse is wrong": check the cited region on the page image, not just the node.
+> - Ablation and perturbation still work, but only test how the model uses the node. They cannot catch a misread.
+> - Flag nodes whose text a model wrote (OCR, vision caption), so the judge knows its "source" is model output (→ [M2](../02-rag-pipeline-end-to-end/README.md), [M13](../13-evaluation/README.md)).
+
 > **LlamaIndex at a glance:** the grounding surface is the `Response` object. A response
 > synthesizer "generates a response from an LLM, using a user query and a given set of text
 > chunks", and "the output of a response synthesizer is a `Response` object" which carries the
-> answer string *and* its source nodes [LI-RS]. Two documented hooks do most of the provenance
+> answer string *and* its source nodes [[LI-RS]](#src-li-rs). Two documented hooks do most of the provenance
 > work. First, `no_text` mode "only runs the retriever to fetch the nodes that would have been
 > sent to the LLM, without actually sending them. Then can be inspected by checking
-> `response.source_nodes`" [LI-RS] — that is the citation-ablation harness above, implemented for
+> `response.source_nodes`" [[LI-RS]](#src-li-rs) — that is the citation-ablation harness above, implemented for
 > free. Second, for `refine` and `compact`, `structured_answer_filtering=True` lets the synthesizer
 > "filter out any input nodes that are not relevant to the question being asked", with the
 > documented caveat that it "is particularly useful if you're using an OpenAI model that supports
 > function calling", since providers without native function calling "may be less reliable in
-> producing the structured response this feature relies on" [LI-RS].
+> producing the structured response this feature relies on" [[LI-RS]](#src-li-rs).
 
 ---
 
@@ -243,17 +256,17 @@ citations are checkable:
 
 - Metadata "is injected into the text for both embedding and LLM model calls" by default, and
   every document's `metadata` "will show up in the `metadata` of each source node created from the
-  document" [LI-DOC]. That inheritance is what makes `response.source_nodes[i].node.metadata` a
+  document" [[LI-DOC]](#src-li-doc). That inheritance is what makes `response.source_nodes[i].node.metadata` a
   usable citation payload.
 - The two audiences can be decoupled. `excluded_llm_metadata_keys` removes keys from what the
   model reads, and `get_content(metadata_mode=MetadataMode.LLM)` shows exactly what the model will
   see; `excluded_embed_metadata_keys` and `MetadataMode.EMBED` do the same for the embedder
-  [LI-DOC]. The documented rationale is the one that matters for citations: "The `file_name` might
+  [[LI-DOC]](#src-li-doc). The documented rationale is the one that matters for citations: "The `file_name` might
   include information that will help generate better embeddings" while you may not want the model
-  reading it [LI-DOC].
+  reading it [[LI-DOC]](#src-li-doc).
 - The rendered form is controlled by three attributes — `metadata_seperator` (default `"\n"`),
   `metadata_template` (default `"{key}: {value}"`), and `text_template` (default
-  `"{metadata_str}\n\n{content}"`) [LI-DOC].
+  `"{metadata_str}\n\n{content}"`) [[LI-DOC]](#src-li-doc).
 
 That last triple is where citation UX quietly breaks. If the citation UI renders the retrieved
 node's raw text but the template that produced it injected twelve metadata keys, then the span the
@@ -264,7 +277,7 @@ synthesizer**, and `get_content(metadata_mode=MetadataMode.LLM)` is the function
 | Provenance field | Source | Why the reader needs it | Failure if absent |
 |---|---|---|---|
 | `node.ref_doc_id` | Docstore lineage (→ M14) | "Which document is this?" — not which chunk | Citation survives a re-chunk and points nowhere |
-| Stable document identifier | `doc_id` set at load, e.g. `filename_as_id` [LI-DOC] | Deep-link into the source system | Citations rot on every re-ingest |
+| Stable document identifier | `doc_id` set at load, e.g. `filename_as_id` [[LI-DOC]](#src-li-doc) | Deep-link into the source system | Citations rot on every re-ingest |
 | Node identifiers | Node `id_` | Reproduce the retrieval for an audit | Cannot reconstruct a disputed answer |
 | Jurisdiction / effective date | Document metadata (→ M6) | Distinguish two versions of the same clause | Superseded clause cited as current → M14, M20 |
 | Span offsets within the node | Not documented for `CitationQueryEngine` — see Unsupported | Highlight exactly the supporting sentence | Reader re-reads the whole chunk |
@@ -293,7 +306,7 @@ The engineering consequence is that abstention must be *reachable*. If the promp
 question", the abstention path is unreachable no matter what the code does, because the model has
 no instruction that produces it. Two documented mechanisms make it reachable: instruction-level
 (it must be in the system prompt, → M11) and filter-level (`structured_answer_filtering` above,
-which discards nodes the synthesizer judges irrelevant [LI-RS], leaving an empty context for the
+which discards nodes the synthesizer judges irrelevant [[LI-RS]](#src-li-rs), leaving an empty context for the
 model to notice).
 
 The reason abstention is treated as a *success* in the table is that it is the only outcome whose
@@ -318,7 +331,7 @@ human (→ M13).
 |---|---|---|---|---|---|
 | Document-level citation | 0.42 | 0.95 | 7 / 40 | 4 m 10 s | Recall looks excellent because everything is cited to a 96-page PDF |
 | Node-level, 1024-token nodes | 0.71 | 0.88 | 4 / 40 | 1 m 35 s | The default. Precision limited by the reader scanning 1024 tokens |
-| Node-level, `citation_chunk_size=512` | 0.78 | 0.86 | 3 / 40 | 1 m 05 s | Re-split citation nodes [LI-CQE]; no re-index needed |
+| Node-level, `citation_chunk_size=512` | 0.78 | 0.86 | 3 / 40 | 1 m 05 s | Re-split citation nodes [[LI-CQE]](#src-li-cqe); no re-index needed |
 | Span-level (per-claim attribution pass) | **0.91** | **0.83** | **1 / 40** | 0 m 25 s | Cost: one attribution call per claim |
 | Span-level + abstention on low-support claims | 0.93 | 0.71 | **0 / 40** | 0 m 20 s | 6 of 40 answers became abstentions |
 
@@ -331,7 +344,7 @@ Three findings decide LogiTrack's citation architecture:
    was correct. Recall that is bought by lowering the bar is not recall.
 2. **The cheapest real win is a parameter, not a project.** Moving from 1024-token to 512-token
    citation nodes is one argument to `CitationQueryEngine.from_args` and no re-index at all,
-   because the engine re-splits at query time [LI-CQE]. It bought 0.07 precision and 30 seconds of
+   because the engine re-splits at query time [[LI-CQE]](#src-li-cqe). It bought 0.07 precision and 30 seconds of
    reviewer time per answer. The rung below it — span-level attribution — bought 0.13 precision
    and cost an extra generation-stage call per claim.
 3. **The abstention row is the only one that reaches zero.** Ungrounded claims go 7 → 0 only when
@@ -394,33 +407,33 @@ choose.
 
 - **"A citation makes an answer trustworthy."** This module presents citations as a provenance
   mechanism, and the framework's own example shows inline markers with numbered source nodes
-  [LI-CQE]. ALCE's three dimensions — "fluency, correctness, and citation quality" — are explicitly
+  [[LI-CQE]](#src-li-cqe). ALCE's three dimensions — "fluency, correctness, and citation quality" — are explicitly
   separate, and the benchmark's headline result is that *"on the ELI5 dataset, even the best models
-  lack complete citation support 50% of the time"* [ALCE23]. **What to change:** treat citation
+  lack complete citation support 50% of the time"* [[ALCE23]](#src-alce23). **What to change:** treat citation
   quality as a metric with a value, never as a property that is either present or absent. A system
   whose best measured citation recall is ~0.5 on a public benchmark, and which reports no citation
   metric of its own, is asserting something it has not measured — which is why the worked example
   above spends a reviewer's afternoon producing two numbers rather than shipping a badge.
 - **"Grounding eliminates hallucination."** RAGTruth was built because the opposite is true:
   *"Despite the integration of RAG, LLMs may still present unsupported or contradictory claims to
-  the retrieved contents"* [RAGTRUTH24]. **What to change:** do not let the retrieval stage's
+  the retrieved contents"* [[RAGTRUTH24]](#src-ragtruth24). **What to change:** do not let the retrieval stage's
   success stand in for the generation stage's. The two have separate failure taxonomies, and the
   module's decision tree exists to keep them separate — a "grounded" pipeline still needs a
   faithfulness measurement (→ M13) and a detection path (→ M19) or nothing catches the residue.
 - **"Attribution is the goal."** AIS is presented as a framework for assessing output "when such
   output pertains to the external world", and it measures whether statements "are supported by
-  underlying sources" [ATTR22]. That is a statement about the *relationship between output and
+  underlying sources" [[ATTR22]](#src-attr22). That is a statement about the *relationship between output and
   source*, and it is silent on the source itself. ContextCite's framing makes the gap explicit by
   offering three diagnoses for a generated statement — "actually grounded in the context, a
-  misinterpretation, or fabricated" [CTXCITE24] — and it is worth noting that all three are about
+  misinterpretation, or fabricated" [[CTXCITE24]](#src-ctxcite24) — and it is worth noting that all three are about
   the model's use of context, none about the context's truth. **What to change:** state in your
   ADR which of the two guarantees you are offering, because the audit trail for "our answer was
   supported by the document we cited" is a materially weaker artifact than "our answer was
   correct", and a regulator will notice the difference.
 - **"Detecting parametric recall is a research problem."** ContextCite describes its method as
-  "simple and scalable" and applicable "on top of any existing language model" [CTXCITE24], while
+  "simple and scalable" and applicable "on top of any existing language model" [[CTXCITE24]](#src-ctxcite24), while
   this module's ablation test needs only the framework's `no_text` mode to fetch the node set
-  without a synthesis call [LI-RS]. The disagreement is not about feasibility but about *what
+  without a synthesis call [[LI-RS]](#src-li-rs). The disagreement is not about feasibility but about *what
   counts as evidence*: an ablation diff is a hard signal on a single claim and says nothing about
   the population, whereas a scored attribution method generalises and needs its own validation.
   **What to change:** use the ablation test as the pre-release spot check and a scored method as
@@ -431,13 +444,13 @@ choose.
 
 ## Sources
 
-- [CitationQueryEngine](https://developers.llamaindex.ai/python/examples/query_engine/citation_query_engine/) — `[LI-CQE]` · owns `CitationQueryEngine.from_args`, `citation_chunk_size` behaviour, the re-splitting of retrieved nodes into citation nodes, and the 1-based/0-based numbering caveat.
-- [Response Synthesizer](https://developers.llamaindex.ai/python/framework/module_guides/querying/response_synthesizers/) — `[LI-RS]` · owns the `Response` object as the synthesis output, `response.source_nodes`, `no_text` mode, and `structured_answer_filtering`.
-- [Defining and Customizing Documents](https://developers.llamaindex.ai/python/framework/module_guides/loading/documents_and_nodes/usage_documents/) — `[LI-DOC]` · owns metadata inheritance onto source nodes, `excluded_llm_metadata_keys`, `MetadataMode.LLM`/`EMBED`, and the metadata/text template defaults.
-- *Measuring Attribution in Natural Language Generation Models* — Hannah Rashkin, Vitaly Nikolaev, Matthew Lamm, Lora Aroyo, Michael Collins, Dipanjan Das, Slav Petrov, Gaurav Singh Tomar, Iulia Turc, David Reitter · arXiv:2112.12870 (2022) · [arxiv.org/abs/2112.12870](https://arxiv.org/abs/2112.12870) — `[ATTR22]` · owns the AIS framework and the definition of attributable-to-identified-sources.
-- *Enabling Large Language Models to Generate Text with Citations* — Tianyu Gao, Howard Yen, Jiatong Yu, Danqi Chen · arXiv:2305.14627 (EMNLP 2023) · [arxiv.org/abs/2305.14627](https://arxiv.org/abs/2305.14627) — `[ALCE23]` · owns the ALCE benchmark, the fluency/correctness/citation-quality decomposition, and the incomplete-citation-support rate.
-- *ContextCite: Attributing Model Generation to Context* — Benjamin Cohen-Wang, Harshay Shah, Kristian Georgiev, Aleksander Mądry · arXiv:2409.00729 (2024) · [arxiv.org/abs/2409.00729](https://arxiv.org/abs/2409.00729) — `[CTXCITE24]` · owns context attribution as a problem statement and the grounded/misinterpretation/fabricated trichotomy.
-- *RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented Language Models* — Cheng Niu, Yuanhao Wu, Juno Zhu, Siliang Xu, Kashun Shum, Randy Zhong, Juntong Song, Tong Zhang · arXiv:2401.00396 (2024) · [arxiv.org/abs/2401.00396](https://arxiv.org/abs/2401.00396) — `[RAGTRUTH24]` · owns the word-level RAG hallucination corpus and the residual-hallucination-under-RAG finding.
+- <a id="src-li-cqe"></a>[CitationQueryEngine](https://developers.llamaindex.ai/python/examples/query_engine/citation_query_engine/) — `[LI-CQE]` · owns `CitationQueryEngine.from_args`, `citation_chunk_size` behaviour, the re-splitting of retrieved nodes into citation nodes, and the 1-based/0-based numbering caveat.
+- <a id="src-li-rs"></a>[Response Synthesizer](https://developers.llamaindex.ai/python/framework/module_guides/querying/response_synthesizers/) — `[LI-RS]` · owns the `Response` object as the synthesis output, `response.source_nodes`, `no_text` mode, and `structured_answer_filtering`.
+- <a id="src-li-doc"></a>[Defining and Customizing Documents](https://developers.llamaindex.ai/python/framework/module_guides/loading/documents_and_nodes/usage_documents/) — `[LI-DOC]` · owns metadata inheritance onto source nodes, `excluded_llm_metadata_keys`, `MetadataMode.LLM`/`EMBED`, and the metadata/text template defaults.
+- <a id="src-attr22"></a>*Measuring Attribution in Natural Language Generation Models* — Hannah Rashkin, Vitaly Nikolaev, Matthew Lamm, Lora Aroyo, Michael Collins, Dipanjan Das, Slav Petrov, Gaurav Singh Tomar, Iulia Turc, David Reitter · arXiv:2112.12870 (2022) · [arxiv.org/abs/2112.12870](https://arxiv.org/abs/2112.12870) — `[ATTR22]` · owns the AIS framework and the definition of attributable-to-identified-sources.
+- <a id="src-alce23"></a>*Enabling Large Language Models to Generate Text with Citations* — Tianyu Gao, Howard Yen, Jiatong Yu, Danqi Chen · arXiv:2305.14627 (EMNLP 2023) · [arxiv.org/abs/2305.14627](https://arxiv.org/abs/2305.14627) — `[ALCE23]` · owns the ALCE benchmark, the fluency/correctness/citation-quality decomposition, and the incomplete-citation-support rate.
+- <a id="src-ctxcite24"></a>*ContextCite: Attributing Model Generation to Context* — Benjamin Cohen-Wang, Harshay Shah, Kristian Georgiev, Aleksander Mądry · arXiv:2409.00729 (2024) · [arxiv.org/abs/2409.00729](https://arxiv.org/abs/2409.00729) — `[CTXCITE24]` · owns context attribution as a problem statement and the grounded/misinterpretation/fabricated trichotomy.
+- <a id="src-ragtruth24"></a>*RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented Language Models* — Cheng Niu, Yuanhao Wu, Juno Zhu, Siliang Xu, Kashun Shum, Randy Zhong, Juntong Song, Tong Zhang · arXiv:2401.00396 (2024) · [arxiv.org/abs/2401.00396](https://arxiv.org/abs/2401.00396) — `[RAGTRUTH24]` · owns the word-level RAG hallucination corpus and the residual-hallucination-under-RAG finding.
 
 **Unsupported (synthetic, no located source):** the LogiTrack customs-desk incident, the Maersk
 clause text, the broker and audit narrative, the 40-query citation subset, and every number in the

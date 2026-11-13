@@ -89,10 +89,10 @@ source of instructions at all?*
 ## The instruction/data boundary is porous
 
 The defining paper on indirect prompt injection states the mechanism in its first paragraphs: "We
-argue that LLM-Integrated Applications blur the line between data and instructions" [INJECT23]. It
+argue that LLM-Integrated Applications blur the line between data and instructions" [[INJECT23]](#src-inject23). It
 then names the vector precisely: "We reveal new attack vectors, using Indirect Prompt Injection,
 that enable adversaries to remotely (without a direct interface) exploit LLM-integrated
-applications by strategically injecting prompts into data likely to be retrieved" [INJECT23].
+applications by strategically injecting prompts into data likely to be retrieved" [[INJECT23]](#src-inject23).
 
 Substitute "retrieved" for "likely to be retrieved" and you have a description of a RAG ingest
 pipeline written a year before the term was standard in this context. Three properties of a RAG
@@ -113,6 +113,12 @@ evidence — are exactly what makes its contents executable.
 to alter text. The embedder's job is to represent it. The assembler's job is to place it in the
 prompt intact. A pipeline built to preserve meaning is a pipeline built to deliver whatever that
 meaning is.
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — mixed-content extraction adds stages that turn content no human sees into prompt text.
+> - A PDF text layer or OCR pass reads tiny, faded or off-page text, the scanned-page twin of the white-on-white HTML above.
+> - A vision-model caption transcribes text inside a figure or stamp: an instruction in an image becomes an instruction in a chunk.
+> - Named risk: OWASP LLM01:2025 warns of "hiding instructions in images", and its scenario #7 embeds a prompt "within an image that accompanies benign text" ([OWASP LLM01](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)).
+> - Each extractor (layout reader, OCR, captioner) is one more write path; parser choice lives in [M3](../03-parsing-and-chunking/README.md).
 
 The consequence is a threat model that has no analogue in classical web security: **the attacker
 does not need to compromise the system; they need to be a document the system trusts.** There is no
@@ -136,14 +142,14 @@ log is identical to 400 successful ingests before it.
 
 | Attack | Where it lands | Prerequisite | Impact | Source |
 |---|---|---|---|---|
-| **Indirect prompt injection** | A document ingested into the corpus; executes at stage 9 | Ability to write one document into a source the ingest job reads | Attacker-controlled answer; arbitrary downstream action if tools are available | "strategically injecting prompts into data likely to be retrieved" [INJECT23] |
-| **Corpus poisoning for answer corruption** | The knowledge base; target answer is chosen by the attacker | Ability to add a small number of texts | An attacker-chosen answer to an attacker-chosen question, without any instruction-following at all | [POISON23] |
-| **Exfiltration via rendered output** | Stage 10 and the client that renders the answer | Injection plus any channel the answer can reference | Data theft — the retrieved context or conversation history leaves through a URL | listed among "data theft, worming, information ecosystem contamination" [INJECT23] |
-| **Confused deputy (OAuth/proxy form)** | An agent's tool layer or MCP proxy | Static client ID + dynamic client registration + a consent cookie | Authorization codes and tokens issued to the attacker for a user who consented to something else | "Attackers can exploit MCP proxy servers that connect to third-party APIs, creating 'confused deputy' vulnerabilities" [MCP-SEC] |
+| **Indirect prompt injection** | A document ingested into the corpus; executes at stage 9 | Ability to write one document into a source the ingest job reads | Attacker-controlled answer; arbitrary downstream action if tools are available | "strategically injecting prompts into data likely to be retrieved" [[INJECT23]](#src-inject23) |
+| **Corpus poisoning for answer corruption** | The knowledge base; target answer is chosen by the attacker | Ability to add a small number of texts | An attacker-chosen answer to an attacker-chosen question, without any instruction-following at all | [[POISON23]](#src-poison23) |
+| **Exfiltration via rendered output** | Stage 10 and the client that renders the answer | Injection plus any channel the answer can reference | Data theft — the retrieved context or conversation history leaves through a URL | listed among "data theft, worming, information ecosystem contamination" [[INJECT23]](#src-inject23) |
+| **Confused deputy (OAuth/proxy form)** | An agent's tool layer or MCP proxy | Static client ID + dynamic client registration + a consent cookie | Authorization codes and tokens issued to the attacker for a user who consented to something else | "Attackers can exploit MCP proxy servers that connect to third-party APIs, creating 'confused deputy' vulnerabilities" [[MCP-SEC]](#src-mcp-sec) |
 | **Confused deputy (RAG-service form)** | A retrieval service holding broader entitlements than the requester | The service queries sources with its own credentials, not the user's | A user obtains answers derived from documents they cannot open | argued in this module; see **Unsupported** |
-| **Tool and query injection** | An agent's tool call emitted at the end of the loop | Injection plus tool access | The injected text becomes the *arguments* of a real API call — a write, not a read | "processing retrieved prompts can act as arbitrary code execution, manipulate the application's functionality, and control how and if other APIs are called" [INJECT23] |
-| **Input-side prompt injection** | The user's own prompt | Direct access to the assistant | Controls overridden for that session | "Prompt Injection (PI) attacks enable attackers to override original instructions and employed controls" [PIAPP23] |
-| **Adversarial prompting against alignment** | The prompt channel | Adversarial suffix construction | A model induced to comply with instructions it was trained to refuse | *Universal and Transferable Adversarial Attacks on Aligned Language Models* [JAILBREAK] |
+| **Tool and query injection** | An agent's tool call emitted at the end of the loop | Injection plus tool access | The injected text becomes the *arguments* of a real API call — a write, not a read | "processing retrieved prompts can act as arbitrary code execution, manipulate the application's functionality, and control how and if other APIs are called" [[INJECT23]](#src-inject23) |
+| **Input-side prompt injection** | The user's own prompt | Direct access to the assistant | Controls overridden for that session | "Prompt Injection (PI) attacks enable attackers to override original instructions and employed controls" [[PIAPP23]](#src-piapp23) |
+| **Adversarial prompting against alignment** | The prompt channel | Adversarial suffix construction | A model induced to comply with instructions it was trained to refuse | *Universal and Transferable Adversarial Attacks on Aligned Language Models* [[JAILBREAK]](#src-jailbreak) |
 
 Read the last two rows as the *context* for the first five rather than as RAG attacks. Input-side
 injection and alignment-breaking adversarial prompts are user-initiated and session-scoped; the
@@ -156,7 +162,7 @@ prompt layout that makes retrieval work.
 ### Why agentic retrieval widens the surface
 
 An agent loop — the framework's `FunctionAgent` runs the model repeatedly, executing each tool call
-and appending its result to the history until the model answers or calls another tool [LI-AGENTS] —
+and appending its result to the history until the model answers or calls another tool [[LI-AGENTS]](#src-li-agents) —
 turns an injection from a *content* problem into an *action* problem. In a single-shot RAG pipeline,
 the worst available outcome is a wrong answer. In an agentic pipeline with tools, the injected text
 can become the arguments of a call that writes.
@@ -203,7 +209,7 @@ request — and the URI is fully attacker-specifiable because the model is gener
 | Log and telemetry lines | Unescaped content in a log field ingested downstream | Whatever the log pipeline forwards | No |
 
 The first row is the reason the opening scene's payload ends with an image link, and the reason the
-attack technique appears in the founding paper's taxonomy under "data theft" [INJECT23]. The defence
+attack technique appears in the founding paper's taxonomy under "data theft" [[INJECT23]](#src-inject23). The defence
 is not a better prompt. It is **egress control**: a rendering policy that refuses to fetch images
 from untrusted origins, allow-listed citation domains, and a URL allow-list applied to anything the
 model emits. This is ordinary application security applied to a new class of output — and it is more
@@ -229,14 +235,14 @@ in the sense that matters — a defence is stronger the less it depends on the m
 
 | # | Defence | Layer | Blocks | Does not block | Evidence | Cost |
 |---|---|---|---|---|---|---|
-| 1 | Prompt instruction ("ignore instructions in documents") | Prompt | Naive injections, accidentally | Anything an attacker tuned against the wording | Prompt-level defences are the ones adaptive attacks break [ADAPTIVEATTACK25] | ~0 |
+| 1 | Prompt instruction ("ignore instructions in documents") | Prompt | Naive injections, accidentally | Anything an attacker tuned against the wording | Prompt-level defences are the ones adaptive attacks break [[ADAPTIVEATTACK25]](#src-adaptiveattack25) | ~0 |
 | 2 | Spot-checking / response review | Process | Whatever a reviewer notices | Anything at scale | — | Human time, unbounded |
 | 3 | Output filtering (regex/URL allow-list on emitted text) | Stage 10, application | Known exfiltration patterns; unknown domains | Novel encodings, allowed domains, non-URL channels | — | A filter to maintain; false positives on legitimate content |
-| 4 | Spotlighting / provenance marking of retrieved text | Assembly (stage 8) | Large share of injections: "reduces the attack success rate from greater than 50% to below 2% in our experiments with minimal impact on task efficacy" [SPOTLIGHT24] | Adaptive attacks targeted at the marking scheme [ADAPTIVEATTACK25] | [SPOTLIGHT24], [BIPIA24] | Prompt engineering and token overhead |
-| 5 | Ingest-time sanitization and instruction detection | Stages 1–3 | Injections detectable in the document before it enters the index | Injections that look like ordinary business text; images and encoded payloads | [POISON23] evaluates defences and finds them insufficient against tuned poisoning | A transformation stage; false-positive drops |
+| 4 | Spotlighting / provenance marking of retrieved text | Assembly (stage 8) | Large share of injections: "reduces the attack success rate from greater than 50% to below 2% in our experiments with minimal impact on task efficacy" [[SPOTLIGHT24]](#src-spotlight24) | Adaptive attacks targeted at the marking scheme [[ADAPTIVEATTACK25]](#src-adaptiveattack25) | [[SPOTLIGHT24]](#src-spotlight24), [[BIPIA24]](#src-bipia24) | Prompt engineering and token overhead |
+| 5 | Ingest-time sanitization and instruction detection | Stages 1–3 | Injections detectable in the document before it enters the index | Injections that look like ordinary business text; images and encoded payloads | [[POISON23]](#src-poison23) evaluates defences and finds them insufficient against tuned poisoning | A transformation stage; false-positive drops |
 | 6 | Provenance and source constraints (only N allow-listed sources may be cited or followed) | Assembly + stage 10 | Poisoning by untrusted writers; citation-based exfiltration to unknown origins | Injections inside allow-listed sources | — | Recall loss when a legitimate source is outside the list |
-| 7 | Design-level isolation: dual-LLM / quarantined processing | Architecture | Injection *by construction* — the model that reads untrusted content has no privileges to abuse | Nothing, if the privileged model still receives unvalidated content | [BIPIA24]; [ADAPTIVEATTACK25] for the residual | An extra model call per query; a harder system to reason about |
-| 8 | Capability isolation: least-privilege tools, read-only by default, human approval for writes | Architecture + process | Action injection; confused-deputy escalation | Anything the reduced capability set still allows | "MCP servers MUST NOT accept any tokens that were not explicitly issued for the MCP server" [MCP-SEC] | Approval friction; a genuinely worse user experience for writes |
+| 7 | Design-level isolation: dual-LLM / quarantined processing | Architecture | Injection *by construction* — the model that reads untrusted content has no privileges to abuse | Nothing, if the privileged model still receives unvalidated content | [[BIPIA24]](#src-bipia24); [[ADAPTIVEATTACK25]](#src-adaptiveattack25) for the residual | An extra model call per query; a harder system to reason about |
+| 8 | Capability isolation: least-privilege tools, read-only by default, human approval for writes | Architecture + process | Action injection; confused-deputy escalation | Anything the reduced capability set still allows | "MCP servers MUST NOT accept any tokens that were not explicitly issued for the MCP server" [[MCP-SEC]](#src-mcp-sec) | Approval friction; a genuinely worse user experience for writes |
 | 9 | Corpus provenance control: only reviewed sources can write to the index | Process + architecture | Most poisoning, including the opening scene | Injections inside the reviewed set; insiders | — | Review latency against a 15-minute freshness SLO |
 
 Three readings of this table are the substance of the module.
@@ -286,19 +292,19 @@ the disagreement in this area — and M21 reports both, because both are part of
 The optimistic result: spotlighting, a family of provenance-marking techniques, "is a robust defense
 that has minimal detrimental impact to underlying NLP tasks", and "using GPT-family models, we find
 that spotlighting reduces the attack success rate from greater than 50% to below 2% in our
-experiments with minimal impact on task efficacy" [SPOTLIGHT24]. The mechanism is explicit and
+experiments with minimal impact on task efficacy" [[SPOTLIGHT24]](#src-spotlight24). The mechanism is explicit and
 matches the diagnosis: "the LLM is unable to distinguish which sections of prompt belong to various
 input sources", so the defence makes the provenance of each section continuously recognizable
-[SPOTLIGHT24]. The framework-agnostic conclusion for a RAG engineer is that the assembly stage —
+[[SPOTLIGHT24]](#src-spotlight24). The framework-agnostic conclusion for a RAG engineer is that the assembly stage —
 stage 8, M11's territory — is a security boundary, not just a budget one.
 
 The pessimistic result, and the reason this module does not stop at row 4: "In this paper, we
 evaluate eight different defenses and bypass all of them using adaptive attacks, consistently
-achieving an attack success rate of over 50%" [ADAPTIVEATTACK25]. The paper's framing is the
+achieving an attack success rate of over 50%" [[ADAPTIVEATTACK25]](#src-adaptiveattack25). The paper's framing is the
 important part — the failure is not that the defences are weak in isolation but that they were
 *evaluated* against non-adaptive attacks: "Despite defenses designed for IPI attacks, their
 robustness remains questionable due to insufficient testing against adaptive attacks... This reveals
-critical vulnerabilities in current defenses" [ADAPTIVEATTACK25].
+critical vulnerabilities in current defenses" [[ADAPTIVEATTACK25]](#src-adaptiveattack25).
 
 The two results are not in contradiction. They measure different things: one measures a defence
 against a fixed attack suite, the other measures defences against an attacker who knows the defence.
@@ -311,9 +317,9 @@ The same pattern repeats in the benchmark literature. BIPIA's authors "introduce
 for indirect prompt injection attacks, named BIPIA" and find that existing LLMs are "universally
 vulnerable" — with the diagnosis that models show "inability to distinguish between informational
 context and actionable instructions, and their lack of awareness in avoiding the execution of
-instructions within external content" [BIPIA24]. Their defences behave as the strength ladder
+instructions within external content" [[BIPIA24]](#src-bipia24). Their defences behave as the strength ladder
 predicts: the black-box defence "provides substantial mitigation", while the white-box defence
-"reduces the attack success rate to near-zero levels" [BIPIA24]. The white-box result requires
+"reduces the attack success rate to near-zero levels" [[BIPIA24]](#src-bipia24). The white-box result requires
 training or modifying the model — which is to say, it requires changing the *system*, not the
 prompt. That is the ladder's lesson, stated in a paper's own results.
 
@@ -331,15 +337,22 @@ suite rather than any particular payload.
 | 2. Build an injection corpus | One planted document per (outcome × placement) pair | Placement matters more than payload: body text, footnote, white-on-white HTML, table cell, document metadata, filename, alt-text, and a previously-deleted document |
 | 3. Measure the baseline | Attack success rate per outcome, with the pipeline exactly as shipped | Report per outcome, never as one aggregate. A 30% aggregate hides a 100% rate on the outcome you actually care about |
 | 4. Apply defences one at a time | ASR delta per defence, in ladder order | Attribution requires one change at a time; a defence-in-depth bundle measured as a bundle cannot be repaired |
-| 5. Re-test adaptively | ASR after an attacker who knows each defence has retried | This step is the difference between a suite that measures your system and a suite that flatters it [ADAPTIVEATTACK25] |
+| 5. Re-test adaptively | ASR after an attacker who knows each defence has retried | This step is the difference between a suite that measures your system and a suite that flatters it [[ADAPTIVEATTACK25]](#src-adaptiveattack25) |
 | 6. Wire it into CI | The suite runs on every change to ingest, assembly, prompting, or tools; a regression above threshold blocks the release | The suite is a regression gate (→ M13's merge gate), not an annual exercise |
 | 7. Keep a human bypass channel | A process for reporting injections the suite misses | Your suite will be incomplete; the report path is how it grows |
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — step 2 needs placements that exist only after mixed-content extraction.
+> - Text inside a chart or stamp in a carrier-agreement PDF, read by a vision captioner.
+> - A scanned customs-manual page whose OCR text is not what a reviewer skims.
+> - A figure caption or equation block carried into the chunk.
+> - Sanitize the *extracted* text (post-OCR, post-caption), not the source file; that is where defence row 5's "images" gap can close.
+> - Deferred: page-image retrieval (e.g. [ColPali](https://arxiv.org/abs/2407.01449)) and adversarial image/audio perturbations on multimodal LLMs ([Bagdasaryan et al.](https://arxiv.org/abs/2307.10490)) leave no text to sanitize; out of scope per [syllabus §1](../../syllabus.md#1-scope-knobs-frozen).
 
 The evaluation environment matters here in a way it does not for quality metrics. Static prompt
 suites go stale because the *system* keeps gaining capabilities: a change to the tool set, or the
 addition of an MCP server, changes what a successful injection can reach, and the old suite does not
 know. AgentDojo was built precisely for this — a dynamic environment for evaluating prompt injection
-attacks and defences against LLM agents [AGENTDOJO24] — and the reason a dynamic environment is
+attacks and defences against LLM agents [[AGENTDOJO24]](#src-agentdojo24) — and the reason a dynamic environment is
 worth its complexity is that the attack's severity is a function of the agent's *current*
 capabilities, which the environment has to model.
 
@@ -361,22 +374,22 @@ tools.
 The framework's transformation interface is exactly right for the job: "A transformation is
 something that takes a list of nodes as an input, and returns a list of nodes", and custom
 transformations are written by subclassing the transformation base class, then used directly or in
-any `IngestionPipeline` [LI-TRANS]. A sanitizer is a transformation that inspects node text for
+any `IngestionPipeline` [[LI-TRANS]](#src-li-trans). A sanitizer is a transformation that inspects node text for
 instruction-like content, records a provenance verdict in node metadata, and either strips the
 content, flags it, or drops the node. Because the pipeline caches on each node + transformation
-pair [LI-IP], adding a sanitizer invalidates the cache for affected nodes only — the re-ingest cost
+pair [[LI-IP]](#src-li-ip), adding a sanitizer invalidates the cache for affected nodes only — the re-ingest cost
 of shipping a new detector is bounded, which is what makes it practical to iterate on one.
 
 Two honest limitations, both verified against the framework documentation rather than assumed.
 
 **The framework does not ship an injection sanitizer.** A documentation search for "sanitization"
 returns no framework page on the subject, and the transformation guide's own worked example of a
-custom transformation is a punctuation stripper [LI-TRANS]. The class hierarchy you build on is
+custom transformation is a punctuation stripper [[LI-TRANS]](#src-li-trans). The class hierarchy you build on is
 documented and stable; the security content of the transformation is entirely yours, and no
 framework version will keep it current for you.
 
 **Postprocessing is a node filter, not a response filter.** The custom `BaseNodePostprocessor`
-interface operates on the retrieved node list before synthesis [LI-NPP], which makes it the right
+interface operates on the retrieved node list before synthesis [[LI-NPP]](#src-li-npp), which makes it the right
 place for a *provenance* filter — dropping nodes from non-allow-listed sources, or nodes flagged by
 the sanitizer — but the wrong place for output-side filtering of the answer text, which happens
 after generation in your own application layer, because filtering the answer is not a node
@@ -385,16 +398,16 @@ LlamaIndex component.** It has to live where the output is rendered or sent.
 
 The agentic and protocol surfaces widen the reach of an injection, and the framework's own
 documentation describes both plainly: an agent loop that "responds either with a direct response, or
-a list of tool calls", executes them, appends results to history, and re-invokes the model [LI-AGENTS];
+a list of tool calls", executes them, appends results to history, and re-invokes the model [[LI-AGENTS]](#src-li-agents);
 and MCP as a standard protocol exposing tools, resources and prompts to LLM applications, which the
-framework can consume or serve [LI-MCP]. Both are capabilities, and capabilities are what an
+framework can consume or serve [[LI-MCP]](#src-li-mcp). Both are capabilities, and capabilities are what an
 injection converts into impact. → M22 prices them.
 
 ---
 
 ## Worked example: three injections into LogiTrack
 
-The lab for this module plants three injections in a copy of the pilot corpus, measures the
+The lab for this module plants three injections in a copy of the [pilot corpus](../../syllabus.md#corpus-scale), measures the
 undefended attack success rate, then adds defences in ladder order and re-measures. Success is
 defined per outcome, not per payload.
 
@@ -487,23 +500,23 @@ to security, and it is what makes the ADR a decision rather than a policy statem
 - **How effective are prompt-level defences against indirect injection?** This is the live
   disagreement, and both sides have published numbers. Spotlighting's authors report a robust
   defence — "we find that spotlighting reduces the attack success rate from greater than 50% to
-  below 2% in our experiments with minimal impact on task efficacy" [SPOTLIGHT24]. The adaptive-attack
+  below 2% in our experiments with minimal impact on task efficacy" [[SPOTLIGHT24]](#src-spotlight24). The adaptive-attack
   paper reports the counter-result on the same class of defences: "In this paper, we evaluate eight
   different defenses and bypass all of them using adaptive attacks, consistently achieving an attack
   success rate of over 50%... This reveals critical vulnerabilities in current defenses"
-  [ADAPTIVEATTACK25]. BIPIA's own numbers contain both, split by defence type: in the black-box
+  [[ADAPTIVEATTACK25]](#src-adaptiveattack25). BIPIA's own numbers contain both, split by defence type: in the black-box
   setting their defence "provides substantial mitigation", while "our white-box defense reduces the
-  attack success rate to near-zero levels" [BIPIA24] — the near-zero figure requiring a modified
+  attack success rate to near-zero levels" [[BIPIA24]](#src-bipia24) — the near-zero figure requiring a modified
   model rather than a modified prompt. **What to change:** report both numbers in your own security
   review, because a defence quoted at 2% ASR and a defence quoted at "over 50% ASR against adaptive
   attacks" may be the same defence measured by different adversaries. The number you are allowed to
   put in a document is the adaptive one, and the fixed-suite number belongs in a footnote.
 - **Is the benchmark evidence transferable to a production pipeline?** Every quantitative result
   quoted in this module comes from a benchmark or a synthetic application: BIPIA is "the first
-  benchmark for indirect prompt injection attacks" [BIPIA24], AgentDojo is a dynamic evaluation
-  environment [AGENTDOJO24], and the founding paper demonstrates its attacks "against both
+  benchmark for indirect prompt injection attacks" [[BIPIA24]](#src-bipia24), AgentDojo is a dynamic evaluation
+  environment [[AGENTDOJO24]](#src-agentdojo24), and the founding paper demonstrates its attacks "against both
   real-world systems, such as Bing's GPT-4 powered Chat and code-completion engines, and synthetic
-  applications built on GPT-4" [INJECT23] — the second half of that list being synthetic. None of
+  applications built on GPT-4" [[INJECT23]](#src-inject23) — the second half of that list being synthetic. None of
   these measures a production RAG deployment with a heterogeneous corpus, a 15-minute ingest SLO,
   per-tenant entitlements, and a human in the loop for writes. **What to change:** treat published
   ASR figures as evidence about *mechanisms* (this class of injection works; this class of defence
@@ -511,9 +524,9 @@ to security, and it is what makes the ADR a decision rather than a policy statem
   importing a number.
 - **Do defences that reduce ASR also reduce utility, and by how much?** The sources disagree by
   omission rather than by contradiction. Spotlighting claims "minimal impact on task efficacy"
-  [SPOTLIGHT24]; BIPIA's white-box defence claims near-zero ASR "all while preserving the output
-  quality of LLMs" [BIPIA24]; the adaptive-attack paper measures attack success only and does not
-  report utility costs [ADAPTIVEATTACK25]. This module's own worked example finds a measurable
+  [[SPOTLIGHT24]](#src-spotlight24); BIPIA's white-box defence claims near-zero ASR "all while preserving the output
+  quality of LLMs" [[BIPIA24]](#src-bipia24); the adaptive-attack paper measures attack success only and does not
+  report utility costs [[ADAPTIVEATTACK25]](#src-adaptiveattack25). This module's own worked example finds a measurable
   utility cost — 11 of 412 nodes dropped, 2 of them legitimate — which is F1 damage caused by an F9
   defence. **What to change:** measure the utility cost of every security control on your own golden
   set and record it as a quality regression against M20's C3 budget, so that security spend is
@@ -524,20 +537,20 @@ to security, and it is what makes the ADR a decision rather than a policy statem
 
 ## Sources
 
-- *Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection* — Kai Greshake, Sahar Abdelnabi, Shailesh Mishra, Christoph Endres, Thorsten Holz, Mario Fritz · arXiv:2302.12173 (2023) · [arxiv.org/abs/2302.12173](https://arxiv.org/abs/2302.12173) — `[INJECT23]` · owns indirect prompt injection, the instruction/data boundary claim, the attack taxonomy including data theft, and the statement that effective mitigations are lacking.
-- *PoisonedRAG: Knowledge Corruption Attacks to Retrieval-Augmented Generation of Large Language Models* — Wei Zou, Runpeng Geng, Binghui Wang, Jinyuan Jia · arXiv:2402.07867 (USENIX Security Symposium 2025) · [arxiv.org/abs/2402.07867](https://arxiv.org/abs/2402.07867) — `[POISON23]` · owns corpus-poisoning attacks against RAG, the five-texts-in-millions result, and the finding that evaluated defences are insufficient.
-- *Benchmarking and Defending Against Indirect Prompt Injection Attacks on Large Language Models* — Jingwei Yi, Yueqi Xie, Bin Zhu, Emre Kiciman, Guangzhong Sun, Xing Xie, Fangzhao Wu · arXiv:2312.14197 (KDD 2025) · [arxiv.org/abs/2312.14197](https://arxiv.org/abs/2312.14197) — `[BIPIA24]` · owns the BIPIA benchmark, the universal-vulnerability finding, the two contributing factors, and the black-box versus white-box defence results.
-- *Defending Against Indirect Prompt Injection Attacks With Spotlighting* — Keegan Hines, Gary Lopez, Matthew Hall, Federico Zarfati, Yonatan Zunger, Emre Kiciman · arXiv:2403.14720 (2024) · [arxiv.org/abs/2403.14720](https://arxiv.org/abs/2403.14720) — `[SPOTLIGHT24]` · owns provenance-marking as a defence and the 50%-to-below-2% attack-success-rate result.
-- *Adaptive Attacks Break Defenses Against Indirect Prompt Injection Attacks on LLM Agents* — Qiusi Zhan, Richard Fang, Henil Shalin Panchal, Daniel Kang · arXiv:2503.00061 (NAACL 2025 Findings) · [arxiv.org/abs/2503.00061](https://arxiv.org/abs/2503.00061) — `[ADAPTIVEATTACK25]` · owns the negative result that adaptive attacks bypass eight evaluated defences at over 50% attack success rate, and the methodological requirement to evaluate defences adaptively.
-- *AgentDojo: A Dynamic Environment to Evaluate Prompt Injection Attacks and Defenses for LLM Agents* — Edoardo Debenedetti, Jie Zhang, Mislav Balunović, Luca Beurer-Kellner, Marc Fischer, Florian Tramèr · arXiv:2406.13352 (2024) · [arxiv.org/abs/2406.13352](https://arxiv.org/abs/2406.13352) — `[AGENTDOJO24]` · owns the dynamic evaluation environment whose value is that an agent's capabilities, and therefore an injection's severity, change over time.
-- *Universal and Transferable Adversarial Attacks on Aligned Language Models* — Andy Zou, Zifan Wang, Nicholas Carlini, Milad Nasr, J. Zico Kolter, Matt Fredrikson · arXiv:2307.15043 (2023) · [arxiv.org/abs/2307.15043](https://arxiv.org/abs/2307.15043) — `[JAILBREAK]` · owns input-side adversarial prompting against alignment. Cited at title level in this module as the context row of the attack table; it is **not** a retrieval-side attack and is not used to support any F9 claim.
-- *Prompt Injection attack against LLM-integrated Applications* — Yi Liu, Gelei Deng, Yuekang Li, Kailong Wang, Zihao Wang, Xiaofeng Wang, Tianwei Zhang, Yepang Liu, Haoyu Wang, Yan Zheng, Leo Yu Zhang, Yang Liu · arXiv:2306.05499 (2023) · [arxiv.org/abs/2306.05499](https://arxiv.org/abs/2306.05499) — `[PIAPP23]` · owns the input-side prompt-injection attack surface on LLM-integrated applications.
-- [Security Best Practices](https://modelcontextprotocol.io/docs/2025-11-25/tutorials/security/security_best_practices) — `[MCP-SEC]` · Model Context Protocol specification · owns the confused-deputy attack on MCP proxy servers, the token-passthrough prohibition, session-handling rules, and the `MUST`-level mitigations quoted here.
-- [Model Context Protocol (MCP)](https://developers.llamaindex.ai/python/framework/module_guides/mcp/) — `[LI-MCP]` · owns the framework's MCP client/server surface and the tools/resources/prompts capability list.
-- [Agents](https://developers.llamaindex.ai/python/framework/module_guides/deploying/agents/) — `[LI-AGENTS]` · owns the `FunctionAgent` loop (respond with a tool call, execute, append, re-invoke), `FunctionTool`, `QueryEngineTool` and agent memory — i.e. the capability surface an injection can reach.
-- [Transformations](https://developers.llamaindex.ai/python/framework/module_guides/loading/ingestion_pipeline/transformations/) — `[LI-TRANS]` · owns the transformation interface and custom-transformation pattern used here to implement ingest-time sanitization.
-- [Ingestion Pipeline](https://developers.llamaindex.ai/python/framework/module_guides/loading/ingestion_pipeline/) — `[LI-IP]` · owns the node + transformation cache that bounds the cost of shipping a new sanitizer.
-- [Node Postprocessor](https://developers.llamaindex.ai/python/framework/module_guides/querying/node_postprocessors/) — `[LI-NPP]` · owns the `BaseNodePostprocessor` interface used for provenance filtering on the node list, and the reason it is the wrong place for output-side filtering.
+- <a id="src-inject23"></a>*Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection* — Kai Greshake, Sahar Abdelnabi, Shailesh Mishra, Christoph Endres, Thorsten Holz, Mario Fritz · arXiv:2302.12173 (2023) · [arxiv.org/abs/2302.12173](https://arxiv.org/abs/2302.12173) — `[INJECT23]` · owns indirect prompt injection, the instruction/data boundary claim, the attack taxonomy including data theft, and the statement that effective mitigations are lacking.
+- <a id="src-poison23"></a>*PoisonedRAG: Knowledge Corruption Attacks to Retrieval-Augmented Generation of Large Language Models* — Wei Zou, Runpeng Geng, Binghui Wang, Jinyuan Jia · arXiv:2402.07867 (USENIX Security Symposium 2025) · [arxiv.org/abs/2402.07867](https://arxiv.org/abs/2402.07867) — `[POISON23]` · owns corpus-poisoning attacks against RAG, the five-texts-in-millions result, and the finding that evaluated defences are insufficient.
+- <a id="src-bipia24"></a>*Benchmarking and Defending Against Indirect Prompt Injection Attacks on Large Language Models* — Jingwei Yi, Yueqi Xie, Bin Zhu, Emre Kiciman, Guangzhong Sun, Xing Xie, Fangzhao Wu · arXiv:2312.14197 (KDD 2025) · [arxiv.org/abs/2312.14197](https://arxiv.org/abs/2312.14197) — `[BIPIA24]` · owns the BIPIA benchmark, the universal-vulnerability finding, the two contributing factors, and the black-box versus white-box defence results.
+- <a id="src-spotlight24"></a>*Defending Against Indirect Prompt Injection Attacks With Spotlighting* — Keegan Hines, Gary Lopez, Matthew Hall, Federico Zarfati, Yonatan Zunger, Emre Kiciman · arXiv:2403.14720 (2024) · [arxiv.org/abs/2403.14720](https://arxiv.org/abs/2403.14720) — `[SPOTLIGHT24]` · owns provenance-marking as a defence and the 50%-to-below-2% attack-success-rate result.
+- <a id="src-adaptiveattack25"></a>*Adaptive Attacks Break Defenses Against Indirect Prompt Injection Attacks on LLM Agents* — Qiusi Zhan, Richard Fang, Henil Shalin Panchal, Daniel Kang · arXiv:2503.00061 (NAACL 2025 Findings) · [arxiv.org/abs/2503.00061](https://arxiv.org/abs/2503.00061) — `[ADAPTIVEATTACK25]` · owns the negative result that adaptive attacks bypass eight evaluated defences at over 50% attack success rate, and the methodological requirement to evaluate defences adaptively.
+- <a id="src-agentdojo24"></a>*AgentDojo: A Dynamic Environment to Evaluate Prompt Injection Attacks and Defenses for LLM Agents* — Edoardo Debenedetti, Jie Zhang, Mislav Balunović, Luca Beurer-Kellner, Marc Fischer, Florian Tramèr · arXiv:2406.13352 (2024) · [arxiv.org/abs/2406.13352](https://arxiv.org/abs/2406.13352) — `[AGENTDOJO24]` · owns the dynamic evaluation environment whose value is that an agent's capabilities, and therefore an injection's severity, change over time.
+- <a id="src-jailbreak"></a>*Universal and Transferable Adversarial Attacks on Aligned Language Models* — Andy Zou, Zifan Wang, Nicholas Carlini, Milad Nasr, J. Zico Kolter, Matt Fredrikson · arXiv:2307.15043 (2023) · [arxiv.org/abs/2307.15043](https://arxiv.org/abs/2307.15043) — `[JAILBREAK]` · owns input-side adversarial prompting against alignment. Cited at title level in this module as the context row of the attack table; it is **not** a retrieval-side attack and is not used to support any F9 claim.
+- <a id="src-piapp23"></a>*Prompt Injection attack against LLM-integrated Applications* — Yi Liu, Gelei Deng, Yuekang Li, Kailong Wang, Zihao Wang, Xiaofeng Wang, Tianwei Zhang, Yepang Liu, Haoyu Wang, Yan Zheng, Leo Yu Zhang, Yang Liu · arXiv:2306.05499 (2023) · [arxiv.org/abs/2306.05499](https://arxiv.org/abs/2306.05499) — `[PIAPP23]` · owns the input-side prompt-injection attack surface on LLM-integrated applications.
+- <a id="src-mcp-sec"></a>[Security Best Practices](https://modelcontextprotocol.io/docs/2025-11-25/tutorials/security/security_best_practices) — `[MCP-SEC]` · Model Context Protocol specification · owns the confused-deputy attack on MCP proxy servers, the token-passthrough prohibition, session-handling rules, and the `MUST`-level mitigations quoted here.
+- <a id="src-li-mcp"></a>[Model Context Protocol (MCP)](https://developers.llamaindex.ai/python/framework/module_guides/mcp/) — `[LI-MCP]` · owns the framework's MCP client/server surface and the tools/resources/prompts capability list.
+- <a id="src-li-agents"></a>[Agents](https://developers.llamaindex.ai/python/framework/module_guides/deploying/agents/) — `[LI-AGENTS]` · owns the `FunctionAgent` loop (respond with a tool call, execute, append, re-invoke), `FunctionTool`, `QueryEngineTool` and agent memory — i.e. the capability surface an injection can reach.
+- <a id="src-li-trans"></a>[Transformations](https://developers.llamaindex.ai/python/framework/module_guides/loading/ingestion_pipeline/transformations/) — `[LI-TRANS]` · owns the transformation interface and custom-transformation pattern used here to implement ingest-time sanitization.
+- <a id="src-li-ip"></a>[Ingestion Pipeline](https://developers.llamaindex.ai/python/framework/module_guides/loading/ingestion_pipeline/) — `[LI-IP]` · owns the node + transformation cache that bounds the cost of shipping a new sanitizer.
+- <a id="src-li-npp"></a>[Node Postprocessor](https://developers.llamaindex.ai/python/framework/module_guides/querying/node_postprocessors/) — `[LI-NPP]` · owns the `BaseNodePostprocessor` interface used for provenance filtering on the node list, and the reason it is the wrong place for output-side filtering.
 
 **Unsupported (synthetic, no located source):** LogiTrack, the planted bulletin and its payload, the
 white-on-white HTML and metadata placements, the exfiltration URL, the broker's question, every

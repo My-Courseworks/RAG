@@ -10,7 +10,7 @@
 ## Opening scene — the review nobody passes on the first try
 
 The LogiTrack pilot has been in production for eleven months. The corpus is at 214,000 documents and
-climbing toward the 480,000 projection. P95 is 2.1 s, monthly spend is $5,800, the golden set has
+climbing toward the [480,000 projection](../../syllabus.md#corpus-scale). P95 is 2.1 s, monthly spend is $5,800, the golden set has
 grown from 60 queries to 1,200, and the last C1 incident was seven months ago. By every measure the
 reviewer's slide template has a row for, the system is ready for the wider rollout.
 
@@ -151,7 +151,7 @@ flowchart TD
 
 | Layer | LogiTrack's choice | Owned by | What it costs | What breaks without it |
 |---|---|---|---|---|
-| Retrieval unit | Hierarchical 2048/512/128 with sentence windows for clause-precision strata | M3 | ~6× node count; expansion metadata | F3 on every clause question; the M3 opening scene |
+| Retrieval unit | Hierarchical 2048/512/128 with sentence windows for clause-precision strata | M3 | ~4.6× the vectors of a flat 512 split (leaves only); expansion metadata | F3 on every clause question; the M3 opening scene |
 | Representation | A domain-adapted embedding model, with BM25 retained for identifiers | M4, M7, M15 | Re-embed cost on change; a second index | F4 on UN numbers, clause IDs, part numbers |
 | Index structures | Flat vector + sparse + a property graph for cross-document DG references | M7, M8 | Three stores to operate; graph extraction cost at ingest | The multi-hop stratum, which scores zero on a flat index |
 | Ranking | Cross-encoder rerank, 40 candidates → 6 | M9 | The largest non-generation latency line | F2 on near-duplicates; F5 at assembly |
@@ -189,6 +189,12 @@ observe and re-rank cannot be debugged, and the M2 ledger entry on traces is wha
 | Golden set and eval harness | **Build**, always | It is the instrument every other decision is measured with (M1-1) | Nothing. Outsourcing the instrument outsources the ability to disagree with a vendor |
 | Model providers | **Buy**, routed through a proxy | Model swap must be a config change, never a code change | A model becoming load-bearing for a quality claim that a competitor cannot reproduce |
 
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — the PDF parser row is where mixed content becomes text, so it belongs in the ledger.
+> - Record the parse path per source: text layer, OCR for scanned pages, table extraction, figure captions.
+> - Treat parser and OCR versions like model versions: a change means re-parse, re-chunk, re-embed (→ [M14](../14-ingestion-at-scale/README.md)).
+> - Ask for per-element failure modes: dropped cells, merged columns, wrong reading order (→ [M3](../03-parsing-and-chunking/README.md)).
+> - Vision-model captions are generated text: tag provenance and sanitize them like any document (→ [M21](../21-security-prompt-injection/README.md)).
+
 Two boundaries deserve their own line because teams get them wrong in the same direction.
 
 **The evaluation instrument is never bought.** A vendor's eval suite measures the vendor's product
@@ -203,11 +209,11 @@ rate"). A vendor's classifier is a starting point for a detector, not a substitu
 calibration.
 
 Protocol boundaries complicate the picture in a useful way: where a capability is consumed as a tool
-or a resource over MCP, the framework can serve or consume it [LI-MCP], which means the *integration*
+or a resource over MCP, the framework can serve or consume it [[LI-MCP]](#src-li-mcp), which means the *integration*
 is cheap and the *capability review* becomes the work. The confused-deputy class of failure lives
 exactly there, and the specification's own answer is prescriptive at the `MUST` level: an MCP server
 "**MUST NOT** accept any tokens that were not explicitly issued for the MCP server" and servers that
-implement authorization "**MUST NOT** use sessions for authentication" [MCP-SEC]. Buying the
+implement authorization "**MUST NOT** use sessions for authentication" [[MCP-SEC]](#src-mcp-sec). Buying the
 integration does not buy the authorization model; that remains a decision you make and record.
 
 ---
@@ -219,7 +225,7 @@ target, with headroom stated rather than assumed.
 
 | Dimension | Pilot (60 queries, 3k docs) | Production (1,200 queries, 214k docs) | 12-month target (480k docs) | Constraint | Headroom |
 |---|---|---|---|---|---|
-| Corpus words | 13.5M | ~1.0B | ~2.2B | — | — |
+| [Corpus words](../../syllabus.md#corpus-scale) | 13.5M | ~1.0B | ~2.2B | — | — |
 | Nodes in the dense index | 41k | 2.9M | 6.6M | Index memory | 160× over the pilot; the memory tier changes somewhere around 2M nodes |
 | Ingest volume/month | 3k docs | 12k docs | 22k docs | ≤ 15-min freshness | Sustained ingest must exceed the peak arrival rate by 2× |
 | Full re-embed on a model change | 23.4M tokens | 1.7B tokens | 3.7B tokens | One-off project budget | A two-order-of-magnitude step; needs financing or a rolling migration (→ M14) |
@@ -251,6 +257,11 @@ invisible in a headline scorecard.
    this row is expressed in tokens rather than in currency. This is why M14's rolling-migration design
    is an early decision rather than a scaling contingency: at 480k documents, "we'll just re-embed"
    is not available.
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — the 0.63 numeric stratum is partly a table-extraction question.
+> - Split the stratum by source format: XLSX/HTML tables vs tables inside PDFs (vs scanned pages, if any).
+> - A low slice on PDF tables points at the parser, not the retriever (→ [M3](../03-parsing-and-chunking/README.md)).
+> - The remediation price then includes a re-parse and re-embed of the affected sources (→ [M14](../14-ingestion-at-scale/README.md)).
 
 > **Tradeoff (the ledger entry M22-2).** *Decision:* set the readiness gate on per-stratum recall and
 > measured attack success rate rather than on aggregate recall. *Costs:* a gate that fails more often
@@ -311,7 +322,7 @@ measurement, a cost, and a reversal condition, and every weak answer names a ben
 
 | Challenge | Weak answer | Strong answer shape |
 |---|---|---|
-| *"Why not just use a bigger model / a longer context?"* | "Bigger models are expensive" | Name the constraint (7.06¢/query, 2.5 s P95), the measured evidence ([LONGCONTEXT23] on cost, [INPUTLEN24] on degradation), and the condition under which you would switch — a document-scoped query class that fits the window at your cost ceiling |
+| *"Why not just use a bigger model / a longer context?"* | "Bigger models are expensive" | Name the constraint (7.06¢/query, 2.5 s P95), the measured evidence ([[LONGCONTEXT23]](#src-longcontext23) on cost, [[INPUTLEN24]](#src-inputlen24) on degradation), and the condition under which you would switch — a document-scoped query class that fits the window at your cost ceiling |
 | *"Your recall is 91%. Why is anything failing?"* | "No system is perfect" | Disaggregate: name the stratum, its rate, its share of volume, and its business cost. Then state either the remediation's cost or the accepted risk with a compensating control |
 | *"What happens if an attacker writes to your corpus?"* | A list of defences | Give the measured per-outcome attack success rate, the capability inventory an injection can reach, the residual risk class, and what would notice a successful attack. If the number does not exist, say so and name the suite that will produce it |
 | *"This works at 3,000 documents. Does it work at 480,000?"* | "We'll scale it" | Point at the capacity table: which dimension breaks first, at what value, and what the fix costs. Name the one dimension whose fix is a project rather than a configuration change |
@@ -354,12 +365,17 @@ condition that would bring it in.
 
 | Extension | Why it is out | The condition that brings it in |
 |---|---|---|
-| **Multi-modal retrieval** (image, audio, video embeddings) | Not needed for a text corpus; the framework's multi-modal support is documented as beta for images in documents [LI-RAG] | A source whose meaning is not in its text — scanned rate tables that resist OCR, inspection photos, recorded broker calls |
+| **Multi-modal retrieval** (image, audio, video embeddings) | Not needed for a text corpus; the framework's multi-modal support is documented as beta for images in documents [[LI-RAG]](#src-li-rag) | A source whose meaning is not in its text — scanned rate tables that resist OCR, inspection photos, recorded broker calls |
 | **Fine-tuned generators** | The cost/quality frontier is reached more cheaply by retrieval, ranking and assembly changes; M15 covers the *retriever* fine-tune, which is the retrieval lever | A measured, reproducible quality gap that survives better retrieval, better ranking and a better prompt, and that a generator fine-tune closes |
 | **Online learning / continuous adaptation** | Requires a labelled feedback stream the system does not have; the drift taxonomy's proxies (M19, M20) are dissatisfaction signals, not labels | A reliable ground-truth feedback channel — a human review queue that is actually worked, producing labels at a rate that supports adaptation |
 | **Agentic orchestration beyond retrieval** (multi-agent, long-horizon planning) | Every agent capability is a capability an injection can reach (M21), and the cost ceiling (F8) does not admit unbounded loops | A query class that provably cannot be served by a bounded pipeline, with the capability-surface review completed first |
 | **Building a vector database engine** | The algorithms are analysed in M5; implementing one is a different specialism and is not on the critical path | An ANN requirement no existing engine satisfies — in practice, a filter-expressiveness or quantization constraint, not raw QPS |
 | **Model training from scratch** | Out of scope for a retrieval course by definition | Never, within the boundaries of this course |
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — the line runs between "ends in text" and "stays an image".
+> - In scope: OCR, table extraction, figure captions and vision-model descriptions stored as text. They use the existing text pipeline.
+> - Deferred: image/audio embeddings and page-image retrieval (e.g. [ColPali](https://arxiv.org/abs/2407.01449)). See [syllabus §1](../../syllabus.md#1-scope-knobs-frozen).
+> - Trigger to revisit: a stratum that stays low after better OCR and table extraction, measured per stratum (→ [M13](../13-evaluation/README.md)).
 
 ---
 
@@ -371,8 +387,8 @@ evidence artefact, not a claim.
 | Dimension | Gate | Evidence | Status | Residual risk |
 |---|---|---|---|---|
 | Retrieval quality | recall@10 ≥ 0.85 aggregate, ≥ 0.80 per stratum | 1,200-query golden set, per stratum | **Conditional** — aggregate 0.91; numeric stratum 0.63 | Compliance exposure on numeric extraction; remediation scheduled (text-to-SQL route, M10) |
-| Answer quality | Faithfulness ≥ 0.95 sampled; citation precision ≥ 0.90 | Sampled production scoring with a reference-free evaluator [RAGAS23] plus 40 hand-checked answers per month | Pass | Judge bias (→ M13); mitigated by the hand-checked sample |
-| Latency | P95 ≤ 2.5 s end to end | Per-stage waterfall [LI-RAG] instrumentation | Pass — 2.1 s | 0.4 s headroom; the reranker consumes 0.6 s and is the first cut under pressure |
+| Answer quality | Faithfulness ≥ 0.95 sampled; citation precision ≥ 0.90 | Sampled production scoring with a reference-free evaluator [[RAGAS23]](#src-ragas23) plus 40 hand-checked answers per month | Pass | Judge bias (→ M13); mitigated by the hand-checked sample |
+| Latency | P95 ≤ 2.5 s end to end | Per-stage waterfall [[LI-RAG]](#src-li-rag) instrumentation | Pass — 2.1 s | 0.4 s headroom; the reranker consumes 0.6 s and is the first cut under pressure |
 | Cost | ≤ $18k/month at 8,500 queries/day | Per-stage unit economics | **Pass** — ~$5.8k/month at 6,200 queries/day, with the 2.9¢/query projection at target volume sitting 2.4× inside the 7.06¢ line | The projection assumes the M18 caching, batching and right-sizing work lands. Cost is not what limits the roadmap; latency is |
 | Freshness | ≤ 15 min lag, p99 | Ingest logs; age distribution of retrieved nodes | Pass — 11 min p50, 14 min p99 | A source outside the watch list would not appear in this metric; the node-age audit is the compensating control |
 | Diagnosability | Every stage traced with retained artefacts | Trace store; the four planned-failure injection test | Pass | Retention cost grows linearly with volume |
@@ -398,7 +414,7 @@ a defensible one.
 > question class (→ M8); `Retriever` + `BaseNodePostprocessor` as the two places retrieval is shaped
 > (→ M9, M10); the authorization backstop as a non-optional postprocessor in a single query-engine
 > factory (→ M17); and a `ResponseSynthesizer` whose mode is chosen per question class rather than
-> globally (→ M11). The framework's "swappable storage components" [LI-RAG] are what make the
+> globally (→ M11). The framework's "swappable storage components" [[LI-RAG]](#src-li-rag) are what make the
 > build-vs-buy boundary in this module a `StorageContext` decision instead of a rewrite.
 
 ---
@@ -455,10 +471,10 @@ does.
   different architectures, not variations of one, and neither is superseded. The comparison paper's
   own framing underscores how unsettled the *retrieval-versus-context* axis still is: "Results reveal
   that when resourced sufficiently, LC consistently outperforms RAG in terms of average performance.
-  However, RAG's significantly lower cost remains a distinct advantage" [LONGCONTEXT23]. The
+  However, RAG's significantly lower cost remains a distinct advantage" [[LONGCONTEXT23]](#src-longcontext23). The
   diagnostic-evaluation literature is equally non-prescriptive about architecture, presenting metrics
   and "an in-depth analysis of their performance, revealing insightful patterns and trade-offs in the
-  design choices of RAG architectures" [RAGCHECKER24] — patterns, not a prescription. **What to
+  design choices of RAG architectures" [[RAGCHECKER24]](#src-ragchecker24) — patterns, not a prescription. **What to
   change:** present your reference architecture as *the record of your decisions under your
   constraints*, never as best practice. The defensible claim is "this is what we chose, here is what
   it costs, here is what would reverse it". The indefensible claim — and the one review panels
@@ -468,14 +484,14 @@ does.
   rather than a finding. The pro-long-context evidence is quoted above from `[LONGCONTEXT23]`; the
   counterweight is that effective capacity is not technical capacity — "Our findings show a notable
   degradation in LLMs' reasoning performance at much shorter input lengths than their technical
-  maximum" [INPUTLEN24]. **What to change:** keep the reversal condition explicit in the ledger.
+  maximum" [[INPUTLEN24]](#src-inputlen24). **What to change:** keep the reversal condition explicit in the ledger.
   If a document-scoped query class emerges that fits the window at the cost ceiling, the honest
   architecture routes that class to long-context, exactly as `[LONGCONTEXT23]`'s Self-Route proposes
   — and the architecture review should describe the pipeline as what happens to the queries that do
   *not* fit.
 - **Is the error-budget framing appropriate for a quality SLO?** The infrastructure formulation is
   a rate that can be measured directly — an error budget is "a rate at which the SLOs can be missed",
-  tracked daily or weekly and compared against the SLO violation rate [SRE-SLO]. The scorecard above
+  tracked daily or weekly and compared against the SLO violation rate [[SRE-SLO]](#src-sre-slo). The scorecard above
   uses it for retrieval quality, faithfulness and security, where no such direct rate exists: the
   numerator comes from sampling, and for the security row it comes from a red-team suite whose
   coverage is unknown. **What to change:** present the budget as a decision-making instrument and
@@ -487,16 +503,16 @@ does.
 
 ## Sources
 
-- [Introduction to RAG](https://developers.llamaindex.ai/python/framework/understanding/rag/) — `[LI-RAG]` · owns the five-stage vocabulary used in the readiness scorecard, and the note that the framework's multi-modal support for images in documents is beta, which is the boundary this module's out-of-scope table rests on.
-- [Model Context Protocol (MCP)](https://developers.llamaindex.ai/python/framework/module_guides/mcp/) — `[LI-MCP]` · owns the framework's MCP client and server surface, i.e. the cheap-integration side of the build-versus-buy boundary.
-- [Security Best Practices](https://modelcontextprotocol.io/docs/2025-11-25/tutorials/security/security_best_practices) — `[MCP-SEC]` · Model Context Protocol specification · owns the token-passthrough prohibition and the session-authentication rule quoted here as the reason a bought integration does not buy an authorization model.
-- [Service Level Objectives](https://sre.google/sre-book/service-level-objectives/) — `[SRE-SLO]` · Site Reliability Engineering (O'Reilly), Chapter 4 · owns the error-budget definition that the failure budget and the readiness scorecard adapt.
-- *Retrieval Augmented Generation or Long-Context LLMs? A Comprehensive Study and Hybrid Approach* — Zhuowan Li, Cheng Li, Mingyang Zhang, Qiaozhu Mei, Michael Bendersky · arXiv:2407.16833 (EMNLP 2024, industry track) · [arxiv.org/abs/2407.16833](https://arxiv.org/abs/2407.16833) — `[LONGCONTEXT23]` · owns the RAG-versus-long-context comparison, the cost concession, and the Self-Route routing method. Owned and surveyed in **M1**; cited here for the architecture disagreement. · entry mirrored for local self-containment; **M1** owns the survey.
-- *Same Task, More Tokens: the Impact of Input Length on the Reasoning Performance of Large Language Models* — Mosh Levy, Alon Jacoby, Yoav Goldberg · arXiv:2402.14848 (ACL 2024) · [arxiv.org/abs/2402.14848](https://arxiv.org/abs/2402.14848) — `[INPUTLEN24]` · owns the input-length degradation result. Owned and surveyed in **M1**; cited here for the architecture disagreement. · entry mirrored for local self-containment; **M1** owns the survey.
-- *RAGChecker: A Fine-grained Framework for Diagnosing Retrieval-Augmented Generation* — Dongyu Ru, Lin Qiu, Xiangkun Hu, Tianhang Zhang, Peng Shi, Shuaichen Chang, Cheng Jiayang, Cunxiang Wang, Shichao Sun, Huanyu Li, Zizhao Zhang, Binjie Wang, Jiarong Jiang, Tong He, Zhiguo Wang, Pengfei Liu, Yue Zhang, Zheng Zhang · arXiv:2408.08067 (2024) · [arxiv.org/abs/2408.08067](https://arxiv.org/abs/2408.08067) — `[RAGCHECKER24]` · owns fine-grained diagnostic metrics and the multi-system comparison quoted here as evidence that the literature reports trade-offs rather than prescribing an architecture.
-- *Modular RAG: Transforming RAG Systems into LEGO-like Reconfigurable Frameworks* — Yunfan Gao, Yun Xiong, Meng Wang, Haofen Wang · arXiv:2407.21059 (2024) · [arxiv.org/abs/2407.21059](https://arxiv.org/abs/2407.21059) — `[MODRAG24]` · owns the modular RAG decomposition. Cited here by key at title level only; **M16** owns the survey. · entry mirrored for local self-containment; **M16** owns the survey.
-- *From Local to Global: A Graph RAG Approach to Query-Focused Summarization* — Darren Edge, Ha Trinh, Newman Cheng, Joshua Bradley, Alex Chao, Apurva Mody, Steven Truitt, Dasha Metropolitansky, Robert Osazuwa Ness, Jonathan Larson · arXiv:2404.16130 (2024) · [arxiv.org/abs/2404.16130](https://arxiv.org/abs/2404.16130) — `[GRAPHRAG24]` · owns the graph-based architecture for query-focused summarization over a corpus. Cited here by key at title level only; **M16** owns the survey. · entry mirrored for local self-containment; **M16** owns the survey.
-- *Ragas: Automated Evaluation of Retrieval Augmented Generation* — Shahul Es, Jithin James, Luis Espinosa-Anke, Steven Schockaert · arXiv:2309.15217 (2023) · [arxiv.org/abs/2309.15217](https://arxiv.org/abs/2309.15217) — `[RAGAS23]` · owns the reference-free evaluation family referenced in the scorecard's faithfulness row. Cited here by key only; **M13** owns the survey. · entry mirrored for local self-containment; **M13** owns the survey.
+- <a id="src-li-rag"></a>[Introduction to RAG](https://developers.llamaindex.ai/python/framework/understanding/rag/) — `[LI-RAG]` · owns the five-stage vocabulary used in the readiness scorecard, and the note that the framework's multi-modal support for images in documents is beta, which is the boundary this module's out-of-scope table rests on.
+- <a id="src-li-mcp"></a>[Model Context Protocol (MCP)](https://developers.llamaindex.ai/python/framework/module_guides/mcp/) — `[LI-MCP]` · owns the framework's MCP client and server surface, i.e. the cheap-integration side of the build-versus-buy boundary.
+- <a id="src-mcp-sec"></a>[Security Best Practices](https://modelcontextprotocol.io/docs/2025-11-25/tutorials/security/security_best_practices) — `[MCP-SEC]` · Model Context Protocol specification · owns the token-passthrough prohibition and the session-authentication rule quoted here as the reason a bought integration does not buy an authorization model.
+- <a id="src-sre-slo"></a>[Service Level Objectives](https://sre.google/sre-book/service-level-objectives/) — `[SRE-SLO]` · Site Reliability Engineering (O'Reilly), Chapter 4 · owns the error-budget definition that the failure budget and the readiness scorecard adapt.
+- <a id="src-longcontext23"></a>*Retrieval Augmented Generation or Long-Context LLMs? A Comprehensive Study and Hybrid Approach* — Zhuowan Li, Cheng Li, Mingyang Zhang, Qiaozhu Mei, Michael Bendersky · arXiv:2407.16833 (EMNLP 2024, industry track) · [arxiv.org/abs/2407.16833](https://arxiv.org/abs/2407.16833) — `[LONGCONTEXT23]` · owns the RAG-versus-long-context comparison, the cost concession, and the Self-Route routing method. Owned and surveyed in **M1**; cited here for the architecture disagreement. · entry mirrored for local self-containment; **M1** owns the survey.
+- <a id="src-inputlen24"></a>*Same Task, More Tokens: the Impact of Input Length on the Reasoning Performance of Large Language Models* — Mosh Levy, Alon Jacoby, Yoav Goldberg · arXiv:2402.14848 (ACL 2024) · [arxiv.org/abs/2402.14848](https://arxiv.org/abs/2402.14848) — `[INPUTLEN24]` · owns the input-length degradation result. Owned and surveyed in **M1**; cited here for the architecture disagreement. · entry mirrored for local self-containment; **M1** owns the survey.
+- <a id="src-ragchecker24"></a>*RAGChecker: A Fine-grained Framework for Diagnosing Retrieval-Augmented Generation* — Dongyu Ru, Lin Qiu, Xiangkun Hu, Tianhang Zhang, Peng Shi, Shuaichen Chang, Cheng Jiayang, Cunxiang Wang, Shichao Sun, Huanyu Li, Zizhao Zhang, Binjie Wang, Jiarong Jiang, Tong He, Zhiguo Wang, Pengfei Liu, Yue Zhang, Zheng Zhang · arXiv:2408.08067 (2024) · [arxiv.org/abs/2408.08067](https://arxiv.org/abs/2408.08067) — `[RAGCHECKER24]` · owns fine-grained diagnostic metrics and the multi-system comparison quoted here as evidence that the literature reports trade-offs rather than prescribing an architecture.
+- <a id="src-modrag24"></a>*Modular RAG: Transforming RAG Systems into LEGO-like Reconfigurable Frameworks* — Yunfan Gao, Yun Xiong, Meng Wang, Haofen Wang · arXiv:2407.21059 (2024) · [arxiv.org/abs/2407.21059](https://arxiv.org/abs/2407.21059) — `[MODRAG24]` · owns the modular RAG decomposition. Cited here by key at title level only; **M16** owns the survey. · entry mirrored for local self-containment; **M16** owns the survey.
+- <a id="src-graphrag24"></a>*From Local to Global: A Graph RAG Approach to Query-Focused Summarization* — Darren Edge, Ha Trinh, Newman Cheng, Joshua Bradley, Alex Chao, Apurva Mody, Steven Truitt, Dasha Metropolitansky, Robert Osazuwa Ness, Jonathan Larson · arXiv:2404.16130 (2024) · [arxiv.org/abs/2404.16130](https://arxiv.org/abs/2404.16130) — `[GRAPHRAG24]` · owns the graph-based architecture for query-focused summarization over a corpus. Cited here by key at title level only; **M16** owns the survey. · entry mirrored for local self-containment; **M16** owns the survey.
+- <a id="src-ragas23"></a>*Ragas: Automated Evaluation of Retrieval Augmented Generation* — Shahul Es, Jithin James, Luis Espinosa-Anke, Steven Schockaert · arXiv:2309.15217 (2023) · [arxiv.org/abs/2309.15217](https://arxiv.org/abs/2309.15217) — `[RAGAS23]` · owns the reference-free evaluation family referenced in the scorecard's faithfulness row. Cited here by key only; **M13** owns the survey. · entry mirrored for local self-containment; **M13** owns the survey.
 
 **Unsupported (synthetic, no located source):** LogiTrack, the readiness review and its three
 challenges, the eleven-month production history, every number in the capacity model and the readiness

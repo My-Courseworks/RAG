@@ -57,7 +57,7 @@ budget that said how much degradation was allowed before anyone should stop ship
 Infrastructure teams have had a name for "how much failure is acceptable" for two decades, and the
 name transfers: an **error budget**, defined in the standard treatment as "a rate at which the SLOs
 can be missed", tracked daily or weekly, with the gap against the SLO "used as an input to the
-process that decides when to roll out new releases" [SRE-SLO].
+process that decides when to roll out new releases" [[SRE-SLO]](#src-sre-slo).
 
 The transfer to RAG is not free — the numerator of a quality SLO is measured on a sample, judged by
 a model, and therefore carries the judge's error (→ M13) — but the *shape* transfers intact, and
@@ -114,9 +114,9 @@ architecture and the reason M22 can read the ledger back as a design.
 | **F3** | Chunk-boundary loss | Sentence-window and hierarchical parsing (M3); auto-merging and recursive retrieval (M8) | Answer-completeness on span-level ground truth; fraction of answers whose support crosses a node boundary | Tables and clause hierarchies whose structure the parser still flattens | 2–6× node count; expansion metadata; an extra retrieval hop |
 | **F4** | Representation mismatch | Embedding-model selection (M4); lexical retrieval for exact tokens (M7); domain fine-tuning (M15) | Recall split by stratum — lexical, semantic, jargon-heavy — rather than aggregate | Domain vocabulary that post-dates the fine-tune; multilingual lanes | Embedding spend; re-embed cost on every model change |
 | **F5** | Context overflow | Assembly ordering and packing (M11); budget-aware candidate-set sizing (M18) | Distribution of assembled-context tokens; faithfulness as a function of context length and answer position | A hard window that the assembler cannot see, because the tokenizer it counts with is not the tokenizer the provider uses | Nothing in latency; a permanent argument about whose token count is authoritative |
-| **F6** | Unfaithful synthesis | Prompting and temperature control (M11); citation enforcement and abstention (M12); self-reflection and corrective retrieval (M16, `[SELFRAG23]` and `[CRAG24]`, surveyed there) | Faithfulness and citation precision on a sampled production set — scored with a reference-free evaluator where no ground truth exists [RAGAS23] — plus the abstention rate | Fluent answers that are faithful to a *misleading* span — the M2 worked example's exact shape | A second model call per sampled query, or per query if online |
+| **F6** | Unfaithful synthesis | Prompting and temperature control (M11); citation enforcement and abstention (M12); self-reflection and corrective retrieval (M16, `[SELFRAG23]` and `[CRAG24]`, surveyed there) | Faithfulness and citation precision on a sampled production set — scored with a reference-free evaluator where no ground truth exists [[RAGAS23]](#src-ragas23) — plus the abstention rate | Fluent answers that are faithful to a *misleading* span — the M2 worked example's exact shape | A second model call per sampled query, or per query if online |
 | **F7** | Staleness | Incremental ingest with docstore lineage (M14); `ref_doc_id`-based supersession (M14); this module's freshness audit | Age distribution of retrieved nodes versus source modification times; ingest success rate; orphan-node count | Revisions that arrive outside the watched sources; parser-version changes that silently alter chunking (this module's opening scene) | Ingest orchestration; a docstore; delete-path testing |
-| **F8** | Budget blowout | Unit economics and the latency waterfall (M18); per-stage tracing [LI-OBS] (surveyed in M19) | Per-stage p95 latency and per-stage token spend, alerting on the composite | Any new mitigation added without re-pricing the pipeline | Monitoring that must be maintained as stages change |
+| **F8** | Budget blowout | Unit economics and the latency waterfall (M18); per-stage tracing [[LI-OBS]](#src-li-obs) (surveyed in M19) | Per-stage p95 latency and per-stage token spend, alerting on the composite | Any new mitigation added without re-pricing the pipeline | Monitoring that must be maintained as stages change |
 | **F9** | Poisoned context | Ingest sanitization, provenance constraints, isolation, output filtering (M21) | Injection canary documents in the ingest path; egress monitoring on URLs emitted in answers | Novel injections; the defences' own false-negative rate | A sanitization stage; approval friction; possible recall loss when legitimate documents are flagged |
 | **F10** | Scope leak | ACL propagation onto nodes; the post-retrieval authorization filter as backstop (M17) | Red-team leakage test in CI; post-filter audit log of dropped nodes | A permission change in the source system that has not propagated to the index | Metadata on every node; a filter evaluation per query; a permission-sync job |
 
@@ -134,6 +134,12 @@ of two rows — F3's "clause hierarchies whose structure the parser still flatte
 "parser-version changes that silently alter chunking" — and the value of writing the column down is
 that it tells the post-mortem where to look before the trace does.
 
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — much of the residual-risk column comes from mixed-content pages.
+> - F3: clause tables, rate tables (XLSX/HTML) and DG cross-reference tables lose their structure when flattened to text.
+> - F1: a scanned page with no text layer and no OCR yields no node, which looks like a retrieval miss.
+> - Triage: slice recall by extraction path (text layer, OCR, table extractor, figure caption) before blaming the retriever → [M3](../03-parsing-and-chunking/README.md).
+> - Feed C4 table-only and scan-only failures into the golden set as their own stratum → [M13](../13-evaluation/README.md).
+
 ---
 
 ## The drift taxonomy
@@ -142,7 +148,7 @@ Failure modes describe a pipeline that is wrong now. Drift describes a pipeline 
 is becoming wrong. The concept-drift literature is mature and explicit about the shape of the
 problem: "Concept drift describes unforeseeable changes in the underlying distribution of streaming
 data over time. Concept drift research involves the development of methodologies and techniques for
-drift detection, understanding and adaptation" [DRIFT].
+drift detection, understanding and adaptation" [[DRIFT]](#src-drift).
 
 That framework's enabling assumption is that labels keep arriving — a supervised stream, where the
 ground truth of yesterday's prediction is observable today. **A RAG system violates that
@@ -165,6 +171,13 @@ drift in the *retrieval result set for a fixed user*, caused by a system nobody 
 owns. A user who changed teams on Monday should see a different answer on Tuesday, and if the index
 does not know, the answers are stale in a way the freshness audit cannot see — because the
 documents are current. They are just no longer permitted.
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — the extraction step is a drift source with no row of its own.
+> - Upgrading the OCR engine, layout model or table extractor changes node text while the corpus stays the same.
+>   - Same shape as the opening scene's parser change.
+> - Vision-model figure descriptions stored as text can differ on a forced re-parse unless the model and prompt are pinned.
+> - Detection: stamp the extractor name and version on every node; diff node text per `ref_doc_id` after any extractor change → [M14](../14-ingestion-at-scale/README.md).
+> - Page-image embeddings (e.g. [ColPali](https://arxiv.org/abs/2407.01449)) would add their own embedding-drift lane; deferred, see [syllabus §1](../../syllabus.md#1-scope-knobs-frozen).
 
 > **Tradeoff (the ledger entry M20-2).** *Decision:* run a nightly shadow evaluation of a fixed
 > canary query set against stored previous outputs, and alert on output divergence even when no
@@ -237,7 +250,7 @@ The change process is a loop with four gates, and its most common failure is ski
 |---|---|---|---|
 | **1. Hypothesis** | A named failure ID, a stratum, and a proposed change with a predicted direction of movement | The hypothesis names an ID and a stratum, and predicts which metric moves and by roughly how much | Send it back; "improve retrieval" is not a hypothesis |
 | **2. Offline eval gate** | The frozen golden set, re-run against both the current and candidate pipeline | No stratum regresses beyond its class-C3 tolerance; the target metric improves by more than the noise band; p95 latency and cost per query stay inside F8 | Reject, or re-scope the change |
-| **3. Canary** | A partial, time-limited deployment: "canarying is a partial and time-limited deployment of a change in a service and its evaluation" [SRE-CANARY] | Online proxy metrics (→ M19) do not degrade over the canary window; no C1 or C2 event | Roll back; the offline gate was wrong or the proxy metrics are insensitive |
+| **3. Canary** | A partial, time-limited deployment: "canarying is a partial and time-limited deployment of a change in a service and its evaluation" [[SRE-CANARY]](#src-sre-canary) | Online proxy metrics (→ M19) do not degrade over the canary window; no C1 or C2 event | Roll back; the offline gate was wrong or the proxy metrics are insensitive |
 | **4. Monitor** | The change becomes the new baseline; its detector from the F1–F10 table is armed | The detector fires on real drift within one review cycle, or the change was unobservable and needs instrumenting | The change shipped blind; add the detector before the next change |
 
 Gate 2 is skipped most often because it is the slowest, and it is the one that catches the largest
@@ -316,7 +329,7 @@ with stage attribution, what the instrumentation caught, what it missed, and act
 2. **F7 — staleness (stages 1–5).** The supersession path was never wired: `index.insert` without a
    docstore. The docs are explicit that document management depends on attaching a docstore, keyed
    on `document.doc_id` or `node.ref_doc_id`, so that a re-processed document is upserted rather
-   than duplicated [LI-IP]. Both revisions were therefore current, and their scores differed by
+   than duplicated [[LI-IP]](#src-li-ip). Both revisions were therefore current, and their scores differed by
    0.004.
 3. **F2 — retrieval noise (stage 7).** With two near-identical nodes in the index and no reranker
    configured to prefer the newer revision, the winner was decided by a score difference inside the
@@ -331,7 +344,7 @@ was not being read:
 
 | Gap | The artefact that existed | The check that was added |
 |---|---|---|
-| No detector for duplicated documents | The docstore's `doc_id` → hash map [LI-IP] | A nightly audit: nodes per `ref_doc_id`. Anything above the expected node count is a supersession failure |
+| No detector for duplicated documents | The docstore's `doc_id` → hash map [[LI-IP]](#src-li-ip) | A nightly audit: nodes per `ref_doc_id`. Anything above the expected node count is a supersession failure |
 | No parser-version attribution | The node's metadata carried no parser version | Record the transformation and parser version on every node; alert when a parser version changes under an unchanged corpus |
 | No per-source completeness metric | Span-level ground truth existed for M3's evaluation | Answer completeness sliced by source type, so a carrier-agreement regression cannot hide inside a corpus-wide average |
 
@@ -341,9 +354,9 @@ form is a delete that silently did nothing. (2) Version every transformation and
 node, so that "the parser changed" is a queryable fact rather than an archaeology project. (3) Add
 `TimeWeightedPostprocessor` as a tie-breaker where recency is semantically meaningful, since the
 framework's recency weighting exists precisely for the case where two nodes are equally relevant
-and one is newer [LI-NPP] — used deliberately and never as a substitute for deleting the stale node.
+and one is newer [[LI-NPP]](#src-li-npp) — used deliberately and never as a substitute for deleting the stale node.
 The audit in the first action is built from two things the framework already tracks: each node's
-`ref_doc_id`, and the document-to-nodes map exposed as `ref_doc_info` [LI-DOCMGMT].
+`ref_doc_id`, and the document-to-nodes map exposed as `ref_doc_info` [[LI-DOCMGMT]](#src-li-docmgmt).
 
 **The number that matters after the post-mortem is not the three-hour detection time; it is the
 twenty-nine hours between the ingest and the first signal.** Every hour of that window is a window
@@ -355,11 +368,11 @@ already known.
 > **LlamaIndex at a glance:** localizing a failure to a stage depends on lineage that the framework
 > already stores. The `IngestionPipeline`'s docstore "enable[s] document management" keyed on
 > `doc_id`/`ref_doc_id` with a `doc_id → document_hash` map, re-processing on a hash change and
-> skipping unchanged documents [LI-IP] — which is what turns F7 (staleness) from a guess into a query:
+> skipping unchanged documents [[LI-IP]](#src-li-ip) — which is what turns F7 (staleness) from a guess into a query:
 > compare each node's `ref_doc_id` hash against source. Node–document relationships and
 > `RefDocInfo` give the reverse walk, answer → node id → source document → revision, and the
 > callback/observability layer supplies the per-stage spans that make F5 (context overflow) and F6
-> (unfaithful synthesis) distinguishable in a trace rather than in an argument [LI-OBS].
+> (unfaithful synthesis) distinguishable in a trace rather than in an argument [[LI-OBS]](#src-li-obs).
 
 ---
 
@@ -408,13 +421,13 @@ condition, applied to operations rather than architecture.
   measurement does not exist in the literature this course could locate**. The concept-drift
   framework is mature and precise about its setting — "Concept drift describes unforeseeable changes
   in the underlying distribution of *streaming data* over time", with detection, understanding and
-  adaptation as the three components [DRIFT] — and that setting is a supervised stream where labels
+  adaptation as the three components [[DRIFT]](#src-drift) — and that setting is a supervised stream where labels
   arrive after the prediction. A RAG system has no labels: nobody records whether yesterday's
   demurrage answer was right. The best available RAG evaluation work is explicitly a *diagnostic*
   framework rather than a longitudinal one: RAGChecker's authors "propose a fine-grained evaluation
   framework, RAGChecker, that incorporates a suite of diagnostic metrics for both the retrieval and
   generation modules" and then "evaluate 8 RAG systems and conduct an in-depth analysis of their
-  performance" [RAGCHECKER24] — a static comparison of systems, not a time series of one system.
+  performance" [[RAGCHECKER24]](#src-ragchecker24) — a static comparison of systems, not a time series of one system.
   **What to change:** treat every row of the drift taxonomy as a *hypothesis about your corpus* that
   your own instrumentation has to confirm, and accept that this module's strongest claims are
   engineering arguments. If your nightly canary run shows no divergence over two quarters, that is
@@ -425,7 +438,7 @@ condition, applied to operations rather than architecture.
   canary is representative and slow, and its proxy metrics are noisy. The SRE treatment lands
   squarely on the online side, defining canarying as "a partial and time-limited deployment of a
   change in a service and its evaluation" and framing it as the mechanism that uses the error-budget
-  gap as input to release decisions [SRE-CANARY] [SRE-SLO]. The RAG-specific counter-argument is
+  gap as input to release decisions [[SRE-CANARY]](#src-sre-canary) [[SRE-SLO]](#src-sre-slo). The RAG-specific counter-argument is
   that online quality signals are proxies — regeneration rate and citation clicks measure
   *dissatisfaction*, not correctness — so a canary cannot certify a quality improvement, only the
   absence of a visible regression. **What to change:** do not choose. The gate catches what the
@@ -435,7 +448,7 @@ condition, applied to operations rather than architecture.
 - **Does the error-budget model transfer to a quality SLO at all?** The SRE formulation is
   deliberately about rates that can be measured directly: an error budget is "a rate at which the
   SLOs can be missed", tracked daily or weekly and compared against the SLO violation rate
-  [SRE-SLO]. A RAG quality SLO has no such rate: its numerator comes from a sample judged by a
+  [[SRE-SLO]](#src-sre-slo). A RAG quality SLO has no such rate: its numerator comes from a sample judged by a
   model, so the budget inherits the judge's biases (position, verbosity, self-preference — surveyed
   in **M13**, which owns that claim) and its measurement cost. **What to change:** treat the quality
   budget as a *management instrument* rather than a measurement — it coordinates decisions about
@@ -447,17 +460,17 @@ condition, applied to operations rather than architecture.
 
 ## Sources
 
-- [Ingestion Pipeline](https://developers.llamaindex.ai/python/framework/module_guides/loading/ingestion_pipeline/) — `[LI-IP]` · owns the cache keyed on each node + transformation pair, and the document-management path in which attaching a docstore enables duplicate detection keyed on `document.doc_id` or `node.ref_doc_id` so that a changed document is re-processed and upserted rather than duplicated.
-- [Document Management](https://developers.llamaindex.ai/python/framework/module_guides/indexing/document_management/) — `[LI-DOCMGMT]` · owns `index.insert`, `delete_ref_doc`, `update_ref_doc`, `refresh_ref_docs`, `ref_doc_info` and the `RefDocInfo` structure mapping a document ID to its node IDs and metadata, plus the `filename_as_id` flag.
-- [Node Postprocessor](https://developers.llamaindex.ai/python/framework/module_guides/querying/node_postprocessors/) — `[LI-NPP]` · owns `TimeWeightedPostprocessor` and the postprocessor interface used here for recency tie-breaking.
-- [Observability](https://developers.llamaindex.ai/python/framework/module_guides/observability/) — `[LI-OBS]` · owns the tracing surface (`set_global_handler`, the `instrumentation` module) that the shadow evaluation and per-stage detectors depend on; **M19** owns its survey.
-- [Service Level Objectives](https://sre.google/sre-book/service-level-objectives/) — `[SRE-SLO]` · Site Reliability Engineering (O'Reilly), Chapter 4 · owns the error-budget definition and its use as input to release decisions.
-- [Canarying Releases](https://sre.google/workbook/canarying-releases/) — `[SRE-CANARY]` · The Site Reliability Workbook, Chapter 16 · owns the definition of canarying as a partial and time-limited deployment with evaluation.
-- *Learning under Concept Drift: A Review* — Jie Lu, Anjin Liu, Fan Dong, Feng Gu, Joao Gama, Guangquan Zhang · arXiv:2004.05785 (IEEE TKDE 31(12), 2018) · [arxiv.org/abs/2004.05785](https://arxiv.org/abs/2004.05785) — `[DRIFT]` · owns the concept-drift detection / understanding / adaptation framework and the streaming-distribution definition used here. Note: the platform team's canonical earlier survey (Gama, Žliobaitė, Bifet, Pechenizkiy & Bouchachia, *A survey on concept drift adaptation*, ACM Computing Surveys, 2014) has no open arXiv record; this review, which Gama co-authors, is cited instead so that the entry is verifiable.
-- *RAGChecker: A Fine-grained Framework for Diagnosing Retrieval-Augmented Generation* — Dongyu Ru, Lin Qiu, Xiangkun Hu, Tianhang Zhang, Peng Shi, Shuaichen Chang, Cheng Jiayang, Cunxiang Wang, Shichao Sun, Huanyu Li, Zizhao Zhang, Binjie Wang, Jiarong Jiang, Tong He, Zhiguo Wang, Pengfei Liu, Yue Zhang, Zheng Zhang · arXiv:2408.08067 (2024) · [arxiv.org/abs/2408.08067](https://arxiv.org/abs/2408.08067) — `[RAGCHECKER24]` · owns fine-grained diagnostic metrics for retrieval and generation, and the static multi-system comparison that this module contrasts with longitudinal measurement.
-- *Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection* — Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, Hannaneh Hajishirzi · arXiv:2310.11511 (2023) · [arxiv.org/abs/2310.11511](https://arxiv.org/abs/2310.11511) — `[SELFRAG23]` · owns self-reflective retrieval and critique as an F6 mitigation. Cited here by key only; **M16** owns the survey. · entry mirrored for local self-containment; **M16** owns the survey.
-- *Corrective Retrieval Augmented Generation* — Shi-Qi Yan, Jia-Chen Gu, Yun Zhu, Zhen-Hua Ling · arXiv:2401.15884 (2024) · [arxiv.org/abs/2401.15884](https://arxiv.org/abs/2401.15884) — `[CRAG24]` · owns corrective retrieval as an F1/F6 mitigation. Cited here by key only; **M16** owns the survey. · entry mirrored for local self-containment; **M16** owns the survey.
-- *Ragas: Automated Evaluation of Retrieval Augmented Generation* — Shahul Es, Jithin James, Luis Espinosa-Anke, Steven Schockaert · arXiv:2309.15217 (2023) · [arxiv.org/abs/2309.15217](https://arxiv.org/abs/2309.15217) — `[RAGAS23]` · owns a reference-free RAG evaluation framework, i.e. one that does not require ground truth to score a run. Cited here by key only; **M13** owns the survey. · entry mirrored for local self-containment; **M13** owns the survey.
+- <a id="src-li-ip"></a>[Ingestion Pipeline](https://developers.llamaindex.ai/python/framework/module_guides/loading/ingestion_pipeline/) — `[LI-IP]` · owns the cache keyed on each node + transformation pair, and the document-management path in which attaching a docstore enables duplicate detection keyed on `document.doc_id` or `node.ref_doc_id` so that a changed document is re-processed and upserted rather than duplicated.
+- <a id="src-li-docmgmt"></a>[Document Management](https://developers.llamaindex.ai/python/framework/module_guides/indexing/document_management/) — `[LI-DOCMGMT]` · owns `index.insert`, `delete_ref_doc`, `update_ref_doc`, `refresh_ref_docs`, `ref_doc_info` and the `RefDocInfo` structure mapping a document ID to its node IDs and metadata, plus the `filename_as_id` flag.
+- <a id="src-li-npp"></a>[Node Postprocessor](https://developers.llamaindex.ai/python/framework/module_guides/querying/node_postprocessors/) — `[LI-NPP]` · owns `TimeWeightedPostprocessor` and the postprocessor interface used here for recency tie-breaking.
+- <a id="src-li-obs"></a>[Observability](https://developers.llamaindex.ai/python/framework/module_guides/observability/) — `[LI-OBS]` · owns the tracing surface (`set_global_handler`, the `instrumentation` module) that the shadow evaluation and per-stage detectors depend on; **M19** owns its survey.
+- <a id="src-sre-slo"></a>[Service Level Objectives](https://sre.google/sre-book/service-level-objectives/) — `[SRE-SLO]` · Site Reliability Engineering (O'Reilly), Chapter 4 · owns the error-budget definition and its use as input to release decisions.
+- <a id="src-sre-canary"></a>[Canarying Releases](https://sre.google/workbook/canarying-releases/) — `[SRE-CANARY]` · The Site Reliability Workbook, Chapter 16 · owns the definition of canarying as a partial and time-limited deployment with evaluation.
+- <a id="src-drift"></a>*Learning under Concept Drift: A Review* — Jie Lu, Anjin Liu, Fan Dong, Feng Gu, Joao Gama, Guangquan Zhang · arXiv:2004.05785 (IEEE TKDE 31(12), 2018) · [arxiv.org/abs/2004.05785](https://arxiv.org/abs/2004.05785) — `[DRIFT]` · owns the concept-drift detection / understanding / adaptation framework and the streaming-distribution definition used here. Note: the platform team's canonical earlier survey (Gama, Žliobaitė, Bifet, Pechenizkiy & Bouchachia, *A survey on concept drift adaptation*, ACM Computing Surveys, 2014) has no open arXiv record; this review, which Gama co-authors, is cited instead so that the entry is verifiable.
+- <a id="src-ragchecker24"></a>*RAGChecker: A Fine-grained Framework for Diagnosing Retrieval-Augmented Generation* — Dongyu Ru, Lin Qiu, Xiangkun Hu, Tianhang Zhang, Peng Shi, Shuaichen Chang, Cheng Jiayang, Cunxiang Wang, Shichao Sun, Huanyu Li, Zizhao Zhang, Binjie Wang, Jiarong Jiang, Tong He, Zhiguo Wang, Pengfei Liu, Yue Zhang, Zheng Zhang · arXiv:2408.08067 (2024) · [arxiv.org/abs/2408.08067](https://arxiv.org/abs/2408.08067) — `[RAGCHECKER24]` · owns fine-grained diagnostic metrics for retrieval and generation, and the static multi-system comparison that this module contrasts with longitudinal measurement.
+- <a id="src-selfrag23"></a>*Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection* — Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, Hannaneh Hajishirzi · arXiv:2310.11511 (2023) · [arxiv.org/abs/2310.11511](https://arxiv.org/abs/2310.11511) — `[SELFRAG23]` · owns self-reflective retrieval and critique as an F6 mitigation. Cited here by key only; **M16** owns the survey. · entry mirrored for local self-containment; **M16** owns the survey.
+- <a id="src-crag24"></a>*Corrective Retrieval Augmented Generation* — Shi-Qi Yan, Jia-Chen Gu, Yun Zhu, Zhen-Hua Ling · arXiv:2401.15884 (2024) · [arxiv.org/abs/2401.15884](https://arxiv.org/abs/2401.15884) — `[CRAG24]` · owns corrective retrieval as an F1/F6 mitigation. Cited here by key only; **M16** owns the survey. · entry mirrored for local self-containment; **M16** owns the survey.
+- <a id="src-ragas23"></a>*Ragas: Automated Evaluation of Retrieval Augmented Generation* — Shahul Es, Jithin James, Luis Espinosa-Anke, Steven Schockaert · arXiv:2309.15217 (2023) · [arxiv.org/abs/2309.15217](https://arxiv.org/abs/2309.15217) — `[RAGAS23]` · owns a reference-free RAG evaluation framework, i.e. one that does not require ground truth to score a run. Cited here by key only; **M13** owns the survey. · entry mirrored for local self-containment; **M13** owns the survey.
 
 **Unsupported (synthetic, no located source):** LogiTrack, its incident, the timeline and times in
 the post-mortem, the parser version identifiers, the docstore node counts, the faithfulness trend

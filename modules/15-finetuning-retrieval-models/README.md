@@ -23,7 +23,7 @@ not nearer than the two hundred similar clauses that share the topic without the
 The team's instinct is right, their sequence wrong: they fine-tune a bi-encoder before re-chunking
 the DG rules, before hybrid retrieval for the exact-token queries, before testing a reranker. Eight
 weeks later the model is better on the DG stratum (+0.07 recall@10) and worse on three others, the
-held-out BEIR check was never run, and deployment required a full 480k-document re-embed (→ M14)
+held-out BEIR check was never run, and deployment required a full [480k-document](../../syllabus.md#corpus-scale) re-embed (→ M14)
 plus four figures a month for a pinned artifact nobody remembers how to retrain (→ M20). A third of
 their recall gap came from the fine-tune, two thirds from the re-chunk — misattributed to the model.
 
@@ -43,7 +43,7 @@ that already include specialized domain texts?", answering by evaluating "the pe
 seven state-of-the-art embedding models on FinMTEB" against MTEB and finding "a significant
 performance drop compared to their performance on MTEB", and the sharper result that "the
 performance of general-purpose embedding models on MTEB is not correlated with their performance
-on FinMTEB, indicating the need for domain-specific embedding benchmarks" [FMTEB24].
+on FinMTEB, indicating the need for domain-specific embedding benchmarks" [[FMTEB24]](#src-fmteb24).
 
 Note what that establishes and what it does not: **a leaderboard score does not predict your
 performance** — you cannot select your way out of measuring. It does *not* establish that fine-tuning
@@ -65,6 +65,11 @@ does not, the gap is in the representation and this module owns it. Run that tes
 anything — it costs an afternoon and is the difference between the opening scene's outcome and a
 two-thirds-cheaper fix.
 
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — on scanned or table-heavy pages, a "representation gap" is often a parse miss.
+> - Run the rewrite test on the indexed node text, not the PDF: if OCR mangled "UN3480", the test fails for the wrong reason.
+> - A DG limit inside a table or a stamped scan that flattened badly is row 1 (re-parse), not the last row (fine-tune).
+> - Fix it with layout-aware parsing, OCR and table extraction first (→ [M3](../03-parsing-and-chunking/README.md), [M14](../14-ingestion-at-scale/README.md)).
+
 > **Tradeoff (the ledger entry M15-1).** *Decision:* require a documented diagnosis — the
 > corpus-vocabulary rewrite test plus a per-stratum recall breakdown — before any fine-tuning
 > project is approved. *Costs:* roughly a week of delay on a genuine representation problem, and a
@@ -85,16 +90,16 @@ that reranking addresses the case where "the retrieval looks right, but the mode
 answering the wrong question" by running "a stronger, slower model over the top-`k` candidates",
 and finally that "beyond some of the techniques listed above, we can also try finetuning the
 embedding model" — offered as the last item on the list, and as a path available "over an
-unstructured text corpus, in a label-free way" [LI-PR]. The retrieval-model fine-tuning guide
+unstructured text corpus, in a label-free way" [[LI-PR]](#src-li-pr). The retrieval-model fine-tuning guide
 places the same lever in the same position, describing the toolkit's core as "in-context learning /
 retrieval augmentation, which involves using the models in inference mode and not training the
-models themselves", with embedding fine-tuning as a complement to that [LI-FT].
+models themselves", with embedding fine-tuning as a complement to that [[LI-FT]](#src-li-ft).
 
 | Step | Intervention | What it buys | Reversible by config? | Corpus-wide cost |
 |---|---|---|---|---|
 | **1** | Re-chunk / re-parse, structure-aware (M3) | Fixes F3 and the whole class of "the answer was split" failures; often the largest single gain | ✅ Yes — re-ingest, no artifact changes | One re-embed |
 | **2** | Hybrid retrieval, BM25 + dense (M7) | Fixes the exact-token class entirely; the highest ratio of recall gained to engineering risk | ✅ Yes — a retriever change | None |
-| **3** | Rerank a wider candidate set (M9) | Fixes F2; converts recall into precision; framework-default local cross-encoder is "the recommended default" because it needs "no API key, runs on the same infra as your embeddings" [LI-PR] | ✅ Yes — a postprocessor | None |
+| **3** | Rerank a wider candidate set (M9) | Fixes F2; converts recall into precision; framework-default local cross-encoder is "the recommended default" because it needs "no API key, runs on the same infra as your embeddings" [[LI-PR]](#src-li-pr) | ✅ Yes — a postprocessor | None |
 | **4** | Fine-tune the bi-encoder (this module) | Fixes *only* the representation mismatch that survives 1–3 | ❌ No — a pinned artifact | One re-embed **per model version** |
 | **4b** | Fine-tune the cross-encoder reranker (this module) | Fixes ranking on domain-specific notions of relevance | ⚠️ Partly — a model swap, no re-embed | None (the reranker sees candidate text at query time) |
 
@@ -103,12 +108,12 @@ models themselves", with embedding fine-tuning as a complement to that [LI-FT].
 ## Triples: what the training signal actually is
 
 Bi-encoder training — the architecture itself and its contrastive objective — is M4's claim
-[DPR20] and is not re-surveyed here; what matters for this module is where the three elements of a
+[[DPR20]](#src-dpr20) and is not re-surveyed here; what matters for this module is where the three elements of a
 training triple come from, because the data pipeline *is* the project. The siamese/triplet training
 structure that the modern sentence-embedding training loop inherits is Sentence-BERT's contribution
-[SENTBERT19], used here as the substrate that a domain fine-tune re-trains. The framework guide lays
+[[SENTBERT19]](#src-sentbert19), used here as the substrate that a domain fine-tune re-trains. The framework guide lays
 out the three-step shape: "Generating a synthetic question/answer dataset using LlamaIndex over any
-unstructured context", then "Finetuning the model", then "Evaluating the model" [LI-FT].
+unstructured context", then "Finetuning the model", then "Evaluating the model" [[LI-FT]](#src-li-ft).
 
 | Element | Where it comes from | What it teaches | Failure if the source is wrong |
 |---|---|---|---|
@@ -116,24 +121,31 @@ unstructured context", then "Finetuning the model", then "Evaluating the model" 
 | **Positive** $p^+$ | The chunk the query was generated from; or a click/human judgement | The association $q \leftrightarrow p$ | The synthetic positive is a leak by construction (see below) — useful for training, fatal for evaluation |
 | **Hard negative** $p^-$ | Top-ranked non-relevant chunks from the current retriever | The *boundary* — what makes this clause different from two hundred similar clauses | Mined negatives are closer to the query and therefore more likely to be mislabelled (see below) |
 
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — training pairs inherit whatever text the parser made of tables, scans and figures.
+> - Synthetic queries over a flattened rate table learn the parser's cell layout, not broker phrasing.
+> - Rate-table rows often differ only by a number; that boundary is usually better served by hybrid and filters (→ [M7](../07-sparse-dense-hybrid/README.md), [M6](../06-metadata-filters-multitenancy/README.md)) than by contrastive training.
+> - Tag each pair with its source type (prose, table, OCR page, figure caption) and break recall out per type.
+> - A later parser or table-format change shifts the text the model was trained on: re-run the held-out gates below.
+> - Fine-tuning page-image embedders (e.g. [ColPali](https://arxiv.org/abs/2407.01449)) is deferred ([syllabus §1](../../syllabus.md#1-scope-knobs-frozen)).
+
 Both are worth knowing by structure: RocketQA contributes "three major technical contributions ...,
-namely cross-batch negatives, denoised hard negatives and data augmentation" [HARDNEG20] — the
+namely cross-batch negatives, denoised hard negatives and data augmentation" [[HARDNEG20]](#src-hardneg20) — the
 middle one exists because mined negatives are unreliable, the third because labelled data is scarce.
 GPL's unsupervised domain adaptation "combines a query generator with pseudo
 labeling from a cross-encoder", requiring no labelled target-domain data and reporting "up to
-9.3 points nDCG@10" across "six representative domain-specialized datasets" [GIANT21].
+9.3 points nDCG@10" across "six representative domain-specialized datasets" [[GIANT21]](#src-giant21).
 
 > **LlamaIndex at a glance:** the framework's synthetic-pair primitive is the same object M13
 > declared unfit for evaluation. `generate_question_context_pairs(nodes, llm=llm,
 > num_questions_per_chunk=2)` "uses the LLM to auto-generate questions from each context chunk" and
 > returns an `EmbeddingQAFinetuneDataset` "containing `queries`, `relevant_docs`, and `corpus`"
-> [LI-EVR]. Read the return type's name: it is a *fine-tuning* dataset — the framework built it for
+> [[LI-EVR]](#src-li-evr). Read the return type's name: it is a *fine-tuning* dataset — the framework built it for
 > this module, and M13's retrieval-evaluation guide repurposes it for measurement. That single
 > object is where this module's core tension lives, and it resolves cleanly once stated:
 > **a query conditioned on a chunk is excellent supervision and worthless ground truth.** Use it to
 > train; never use it to score.
 
-The workflow's third step is not optional: the guide ends in "Evaluating the model" [LI-FT], and it
+The workflow's third step is not optional: the guide ends in "Evaluating the model" [[LI-FT]](#src-li-ft), and it
 anchors evaluation of a fine-tuned model in the text-scoring and retrieval suite the corpus already
 has. A model not measured against the gate (→ M13) has not been evaluated.
 
@@ -157,7 +169,7 @@ reasons. The false-negative paper states it as sharply as it can be stated:
 
 > "Hard negative sampling, which is commonly used to improve contrastive learning, can introduce
 > more noise in training. This is because hard negatives are those closer to a given query, and thus
-> more likely to be false negatives." [FN24]
+> more likely to be false negatives." [[FN24]](#src-fn24)
 
 Read that twice, because it inverts the naive intuition. "Harder" negatives are not merely harder to
 learn from — **the harder a negative is, the more likely it is to be a positive your annotation
@@ -168,10 +180,10 @@ where a negative mined from a neighbouring clause is a positive for the paraphra
 
 | Mitigation | Mechanism | Source | Residual risk |
 |---|---|---|---|
-| **Denoise the negatives** | Filter mined negatives through a stronger model before training on them | RocketQA's "denoised hard negatives" [HARDNEG20] | The filter inherits the stronger model's domain blindness |
-| **Pseudo-label with a cross-encoder** | A cross-encoder scores (query, candidate) pairs and supplies soft labels instead of hard positive/negative | GPL: "combines a query generator with pseudo labeling from a cross-encoder" [GIANT21] | The cross-encoder's own relevance notion is now the ceiling |
-| **Regularise the loss** | Add a contrastive confidence regulariser for the NCE loss so the objective is robust to mislabelled negatives | "a novel contrastive confidence regularizer for Noise Contrastive Estimation (NCE) loss ... the regularizer helps dense retrieval models be more robust against false negatives with a theoretical guarantee" [FN24] | A guarantee against label noise is not a guarantee against a systematically biased negative distribution |
-| **Mine with dimensionality reduction over diverse encoders** | Select negatives that are semantically challenging but contextually irrelevant, using several embedding models rather than one | "Our method integrates diverse embedding models, performs dimensionality reduction, and uniquely selects hard negatives" [HNM25] | Enterprise-specific; the published result is on a proprietary corpus with public validation on FiQA, Climate Fever and TechQA [HNM25] |
+| **Denoise the negatives** | Filter mined negatives through a stronger model before training on them | RocketQA's "denoised hard negatives" [[HARDNEG20]](#src-hardneg20) | The filter inherits the stronger model's domain blindness |
+| **Pseudo-label with a cross-encoder** | A cross-encoder scores (query, candidate) pairs and supplies soft labels instead of hard positive/negative | GPL: "combines a query generator with pseudo labeling from a cross-encoder" [[GIANT21]](#src-giant21) | The cross-encoder's own relevance notion is now the ceiling |
+| **Regularise the loss** | Add a contrastive confidence regulariser for the NCE loss so the objective is robust to mislabelled negatives | "a novel contrastive confidence regularizer for Noise Contrastive Estimation (NCE) loss ... the regularizer helps dense retrieval models be more robust against false negatives with a theoretical guarantee" [[FN24]](#src-fn24) | A guarantee against label noise is not a guarantee against a systematically biased negative distribution |
+| **Mine with dimensionality reduction over diverse encoders** | Select negatives that are semantically challenging but contextually irrelevant, using several embedding models rather than one | "Our method integrates diverse embedding models, performs dimensionality reduction, and uniquely selects hard negatives" [[HNM25]](#src-hnm25) | Enterprise-specific; the published result is on a proprietary corpus with public validation on FiQA, Climate Fever and TechQA [[HNM25]](#src-hnm25) |
 | **Audit by hand** | Sample the 100 hardest negatives and read them against the query | This module | The only method that catches a *systematic* labelling bias rather than an average noise level; costs an afternoon |
 
 The audit is not a throwaway: a false-negative rate of 3% concentrated in the hardest 10% of negatives
@@ -184,7 +196,7 @@ output is a manifest rate — "of the
 > 100-sample hand audit rather than pushing to the hardest available pairs. *Costs:* an extra
 > cross-encoder pass over every candidate at data-construction time, plus a recurring audit, and a
 > ceiling on how much boundary sharpening you get. *Accepted because:* past some hardness the
-> marginal pair is more likely to be a mislabelled positive than a useful negative [FN24], so the
+> marginal pair is more likely to be a mislabelled positive than a useful negative [[FN24]](#src-fn24), so the
 > gradient it contributes points in the wrong direction and no in-loop metric can detect it.
 > *Reverses if:* the corpus has a dense, verified relevance-annotation layer — a hand-judged
 > negative set — where mined hardness carries less label risk and the cap can be raised.
@@ -254,21 +266,21 @@ flowchart TD
 | | Fine-tune the bi-encoder | Fine-tune the cross-encoder (reranker) |
 |---|---|---|
 | **Failure mode addressed** | F1 · retrieval miss — the chunk never reaches the candidate set | F2 · retrieval noise — the chunk is in the candidate set and ranked low |
-| **Can it fix a retrieval miss?** | Yes, if the miss is representational | **No.** Reranking cannot promote a chunk that was never retrieved — a reranker's entire input is the retriever's candidate set [LI-PR] |
+| **Can it fix a retrieval miss?** | Yes, if the miss is representational | **No.** Reranking cannot promote a chunk that was never retrieved — a reranker's entire input is the retriever's candidate set [[LI-PR]](#src-li-pr) |
 | **Corpus-wide cost** | Full re-embed, every model version (→ M14) | None — the model is applied at query time |
 | **Latency cost** | None (same encoder architecture, same dimension) | Added per-query inference over the candidate set; measured in M9's lab |
 | **Rollback** | Requires another full re-embed | Swap the model back |
 | **Rollout risk** | Highest in the course: a bad model version is a bad index, and recovering needs a backfill | Low: candidate set unchanged, so a bad reranker produces a worse *ordering*, not a worse *corpus* |
-| **Documented framework path** | Embedding fine-tuning guides, plus the adapter option over "any black-box embedding" [LI-FT] | Cross-encoder fine-tuning with `sentence-transformers`, plus a hosted custom-reranker path [LI-FT] |
+| **Documented framework path** | Embedding fine-tuning guides, plus the adapter option over "any black-box embedding" [[LI-FT]](#src-li-ft) | Cross-encoder fine-tuning with `sentence-transformers`, plus a hosted custom-reranker path [[LI-FT]](#src-li-ft) |
 
 **The reranker is the better first fine-tune, for cost reasons that have nothing to do with quality.**
 It addresses the failure mode the retriever's candidate set is designed to tolerate (a wide
-`similarity_top_k` of 10–20 reranked down to a `top_n` of 3–5 [LI-PR]), requires no re-embed, and is
+`similarity_top_k` of 10–20 reranked down to a `top_n` of 3–5 [[LI-PR]](#src-li-pr)), requires no re-embed, and is
 reversible — the cheapest place to learn domain adaptation before committing to an artifact.
 
 **Training the reranker can improve the retriever.** The adapters study considers "knowledge sharing
-between rerankers and first stage rankers" explicitly [ADAPTER23], and cross-encoder judgements
-are precisely the pseudo-labels GPL uses to adapt a bi-encoder [GIANT21].
+between rerankers and first stage rankers" explicitly [[ADAPTER23]](#src-adapter23), and cross-encoder judgements
+are precisely the pseudo-labels GPL uses to adapt a bi-encoder [[GIANT21]](#src-giant21).
 
 > **Tradeoff (the ledger entry M15-4).** *Decision:* when the diagnosis points at both axes, ship
 > the fine-tuned reranker first and use its judgements as the pseudo-labels for a subsequent
@@ -289,7 +301,7 @@ Fine-tuning on-domain is a distribution shift applied to your own model, and the
 forgetting: in-domain scores rise while everything else falls. The domain-adaptation literature
 reports one sobering version of this. After proposing GPL, the same paper investigates
 "the role of six recent pre-training methods in the scenario of domain adaptation for retrieval
-tasks, where only three could yield improved results" [GIANT21] — half the methods studied did not
+tasks, where only three could yield improved results" [[GIANT21]](#src-giant21) — half the methods studied did not
 help. That negative result comes from the paper that also reports the positive one, and it is the
 right prior: a substantial fraction of adaptation attempts on your domain will not improve retrieval.
 
@@ -298,7 +310,7 @@ The framework guide prescribes the instrument, and is explicit about the out-of-
 dataset, it may be helpful to view whether and by how much its performance degrades on a diverse
 set of domains. This can be an indication of how much data drift may affect your retrieval
 accuracy, such as if you add documents to your RAG system outside of your fine-tuning training
-distribution" [LI-CWE]. BEIR — surveyed in **M4**, cited here only as that instrument — is the named
+distribution" [[LI-CWE]](#src-li-cwe). BEIR — surveyed in **M4**, cited here only as that instrument — is the named
 benchmark for this check.
 
 The held-out protocol therefore has **three** sets, and shipping with two is the common mistake:
@@ -351,7 +363,7 @@ Five findings, in the order they should change a decision:
 1. **Steps 1–3 close 17 of the 24 points before any fine-tuning.** Re-chunking plus hybrid retrieval
    takes DG recall from 0.62 to 0.79, and the hybrid step alone is a configuration change.
 2. **Synthetic-only training moves DG recall by 0.02 and *costs* the general stratum 0.01 and the
-   out-of-domain set 0.03** — the generator's phrasing teaches paraphrase transfer, not jargon [GIANT21].
+   out-of-domain set 0.03** — the generator's phrasing teaches paraphrase transfer, not jargon [[GIANT21]](#src-giant21).
 3. **The mixed set is worth more than any hyperparameter.** 40% real logged queries moves DG recall
    from 0.81 to 0.86 for the same 2,000 pairs; labelled real queries are the scarce resource.
 4. **The reranker fine-tune reaches 0.85 with no re-embed and no out-of-domain cost worth reporting**
@@ -408,44 +420,44 @@ thirds of the gap, or that the corpus-rewrite test failed and no configuration c
 - **"Fine-tuning the retriever reliably beats hybrid search plus reranking for the same spend."**
   The honest finding is that **no source located for this module performs that comparison**. The
   framework's guide states a magnitude without a baseline —
-  "Finetuning gives you a 5-10% increase in retrieval evaluation metrics" [LI-FT] — while GPL reports
+  "Finetuning gives you a 5-10% increase in retrieval evaluation metrics" [[LI-FT]](#src-li-ft) — while GPL reports
   its domain-adaptation gains as "up to 9.3 points nDCG@10" on "six representative
-  domain-specialized datasets" [GIANT21]. Those two are in different units, against different
+  domain-specialized datasets" [[GIANT21]](#src-giant21). Those two are in different units, against different
   baselines, and neither is measured against a hybrid-plus-reranker control. The closest thing to a
   spend-controlled result points the *other* way: adapters on SPLADE, a **sparse** retriever,
   "not only optimizes just 2% of training parameters, but outperforms fully fine-tuned counterpart
   and existing parameter-efficient dense IR models on IR benchmark datasets", and it addresses
   "domain adaptation of neural retrieval thanks to adapters on cross-domain BEIR datasets and
-  TripClick" [ADAPTER23]. The cheap adaptation of the *lexical* half of a hybrid system outperformed
+  TripClick" [[ADAPTER23]](#src-adapter23). The cheap adaptation of the *lexical* half of a hybrid system outperformed
   the expensive adaptation of the dense half. **What to change:** answer the spend comparison locally,
   on the M13 harness, with a hybrid-plus-reranker control in the same table.
 - **"Harder negatives are better negatives."** This is the field's most repeated piece of training
   folklore, and the false-negative paper states the opposite mechanism directly: hard negatives
-  "are those closer to a given query, and thus more likely to be false negatives" [FN24]. RocketQA's
+  "are those closer to a given query, and thus more likely to be false negatives" [[FN24]](#src-fn24). RocketQA's
   response was not to mine harder but to *denoise* — "denoised hard negatives" is one of its three
-  named contributions [HARDNEG20] — and GPL replaced hard binary labels with cross-encoder
-  pseudo-labels [GIANT21]. The enterprise mining work takes the middle position, selecting for
+  named contributions [[HARDNEG20]](#src-hardneg20) — and GPL replaced hard binary labels with cross-encoder
+  pseudo-labels [[GIANT21]](#src-giant21). The enterprise mining work takes the middle position, selecting for
   "semantically challenging but contextually
-  irrelevant documents" using multiple embedding models and dimensionality reduction [HNM25].
+  irrelevant documents" using multiple embedding models and dimensionality reduction [[HNM25]](#src-hnm25).
   **What to change:** state a hardness cap, add a denoising stage, and audit the hardest sample by
   hand — the failure is a *systematic* bias concentrated in exactly the pairs your miner prefers.
 - **"You need a domain-specific embedding model."** FinMTEB sets up the question as "Is the
   development of domain-specific embedding models necessary when general-purpose models are trained
   on vast corpora that already include specialized domain texts?" and answers it with evidence that
   general models "struggle to capture domain-specific linguistic and semantic patterns", plus the
-  finding that MTEB performance "is not correlated with their performance on FinMTEB" [FMTEB24].
+  finding that MTEB performance "is not correlated with their performance on FinMTEB" [[FMTEB24]](#src-fmteb24).
   This module accepts the first half — a domain gap exists and is measurable — and disputes the
   prescription. The *architecture* of the fix is not settled: adapting an existing retriever
-  parameter-efficiently can beat a full fine-tune [ADAPTER23], and the framework documents an adapter
-  path "over any black-box embedding" as an alternative to training the model itself [LI-FT]. And
+  parameter-efficiently can beat a full fine-tune [[ADAPTER23]](#src-adapter23), and the framework documents an adapter
+  path "over any black-box embedding" as an alternative to training the model itself [[LI-FT]](#src-li-ft). And
   "domain-specific model" and "domain-adapted model" are different objects with different costs, only
   the second reachable by a team with 2,000 pairs and one GPU. **What to change:** separate the
   diagnosis from the prescription, and report *which* kind of adaptation you chose.
 - **"Synthetic data is the way to get domain training data."** GPL's central claim is that
   unsupervised domain adaptation is possible by combining "a query generator with pseudo labeling
   from a cross-encoder", requiring no target-domain labels, with results across six datasets
-  [GIANT21]; the framework's guide makes the same move, generating a synthetic question/answer
-  dataset as step one of its three-step workflow [LI-FT]. M13 argued the opposite for *evaluation* —
+  [[GIANT21]](#src-giant21); the framework's guide makes the same move, generating a synthetic question/answer
+  dataset as step one of its three-step workflow [[LI-FT]](#src-li-ft). M13 argued the opposite for *evaluation* —
   a query conditioned on its own target chunk cannot serve as ground truth. The positions are
   reconcilable, but at a cost neither source states: if training and evaluation queries come from the
   same generator family, you measure the generator's phrasing distribution, not your users'. GPL's own
@@ -458,18 +470,18 @@ thirds of the gap, or that the corpus-rewrite test failed and no configuration c
 
 ## Sources
 
-- [Fine-tuning](https://developers.llamaindex.ai/python/framework/optimizing/fine-tuning/fine-tuning/) — `[LI-FT]` · owns the embedding-fine-tuning benefit statement, the "5-10% increase" magnitude, the three-step generate/fine-tune/evaluate workflow, the adapter-over-a-black-box-embedding option, cross-encoder fine-tuning with `sentence-transformers`, and the hosted custom-reranker path.
-- [Building Performant RAG Applications for Production](https://developers.llamaindex.ai/python/framework/optimizing/production_rag/) — `[LI-PR]` · owns the intervention ordering, the reranker's role against recall-tuned retrievers, the retrieve-wide-then-rerank-narrow pattern with `top_n` 3–5, `SentenceTransformerRerank` as the recommended local default, and "Optimize Context Embeddings" as the last item on the list.
-- [Usage Pattern (Retrieval)](https://developers.llamaindex.ai/python/framework/module_guides/evaluating/usage_pattern_retrieval/) — `[LI-EVR]` · owns `generate_question_context_pairs`, its per-chunk query generation, and the `EmbeddingQAFinetuneDataset` return type with `queries`, `relevant_docs`, and `corpus`.
-- [Component Wise Evaluation](https://developers.llamaindex.ai/python/framework/optimizing/evaluation/component_wise_evaluation/) — `[LI-CWE]` · owns the post-fine-tuning out-of-domain degradation check, the data-drift framing of that check, and BEIR as the instrument for it.
-- *Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks* — Nils Reimers, Iryna Gurevych · arXiv:1908.10084 (EMNLP 2019) · [arxiv.org/abs/1908.10084](https://arxiv.org/abs/1908.10084) — `[SENTBERT19]` · owns the siamese/triplet training structure and cosine-comparable sentence embeddings; cited here only as the training substrate a domain fine-tune re-trains · mirrored for local self-containment; **M4** owns the survey of the embedding-model architecture.
-- *Dense Passage Retrieval for Open-Domain Question Answering* — owned by **M4**, surveyed there; cited here only by key as the owner of the bi-encoder architecture and its contrastive objective, which this module trains rather than re-derives — `[DPR20]`.
-- *RocketQA: An Optimized Training Approach to Dense Passage Retrieval for Open-Domain Question Answering* — Yingqi Qu, Yuchen Ding, Jing Liu, Kai Liu, Ruiyang Ren, Wayne Xin Zhao, Daxiang Dong, Hua Wu, Haifeng Wang · arXiv:2010.08191 (NAACL 2021) · [arxiv.org/abs/2010.08191](https://arxiv.org/abs/2010.08191) — `[HARDNEG20]` · owns cross-batch negatives, denoised hard negatives, and data augmentation as the three training contributions.
-- *GPL: Generative Pseudo Labeling for Unsupervised Domain Adaptation of Dense Retrieval* — Kexin Wang, Nandan Thakur, Nils Reimers, Iryna Gurevych · arXiv:2112.07577 (NAACL 2022) · [arxiv.org/abs/2112.07577](https://arxiv.org/abs/2112.07577) — `[GIANT21]` · owns generative pseudo-labelling, the query-generator plus cross-encoder construction, the up-to-9.3-nDCG@10 domain-adaptation result, and the negative result that only three of six pre-training methods improved retrieval.
-- *Mitigating the Impact of False Negatives in Dense Retrieval with Contrastive Confidence Regularization* — Shiqi Wang, Yeqin Zhang, Cam-Tu Nguyen · arXiv:2401.00165 (AAAI 2024) · [arxiv.org/abs/2401.00165](https://arxiv.org/abs/2401.00165) — `[FN24]` · owns the false-negative problem statement for hard-negative sampling and the contrastive confidence regulariser for the NCE loss.
-- *Hard Negative Mining for Domain-Specific Retrieval in Enterprise Systems* — Hansa Meghwani, Amit Agarwal, Priyaranjan Pattnayak, Hitesh Laxmichand Patel, Srikant Panda · arXiv:2505.18366 (ACL 2025) · [arxiv.org/abs/2505.18366](https://arxiv.org/abs/2505.18366) — `[HNM25]` · owns the enterprise hard-negative-mining framework with multi-embedding dimensionality reduction and its MRR improvements.
-- *Do We Need Domain-Specific Embedding Models? An Empirical Investigation* — Yixuan Tang, Yi Yang · arXiv:2409.18511 (2024) · [arxiv.org/abs/2409.18511](https://arxiv.org/abs/2409.18511) — `[FMTEB24]` · owns FinMTEB, the measured general-model performance drop on a domain benchmark, and the non-correlation between MTEB and domain-benchmark performance.
-- *Parameter-Efficient Sparse Retrievers and Rerankers using Adapters* — Vaishali Pal, Carlos Lassance, Hervé Déjean, Stéphane Clinchant · arXiv:2303.13220 (ECIR 2023) · [arxiv.org/abs/2303.13220](https://arxiv.org/abs/2303.13220) — `[ADAPTER23]` · owns adapter-based domain adaptation for sparse retrievers and rerankers, the outperform-fully-fine-tuned-dense result, and knowledge sharing between rerankers and first-stage rankers.
+- <a id="src-li-ft"></a>[Fine-tuning](https://developers.llamaindex.ai/python/framework/optimizing/fine-tuning/fine-tuning/) — `[LI-FT]` · owns the embedding-fine-tuning benefit statement, the "5-10% increase" magnitude, the three-step generate/fine-tune/evaluate workflow, the adapter-over-a-black-box-embedding option, cross-encoder fine-tuning with `sentence-transformers`, and the hosted custom-reranker path.
+- <a id="src-li-pr"></a>[Building Performant RAG Applications for Production](https://developers.llamaindex.ai/python/framework/optimizing/production_rag/) — `[LI-PR]` · owns the intervention ordering, the reranker's role against recall-tuned retrievers, the retrieve-wide-then-rerank-narrow pattern with `top_n` 3–5, `SentenceTransformerRerank` as the recommended local default, and "Optimize Context Embeddings" as the last item on the list.
+- <a id="src-li-evr"></a>[Usage Pattern (Retrieval)](https://developers.llamaindex.ai/python/framework/module_guides/evaluating/usage_pattern_retrieval/) — `[LI-EVR]` · owns `generate_question_context_pairs`, its per-chunk query generation, and the `EmbeddingQAFinetuneDataset` return type with `queries`, `relevant_docs`, and `corpus`.
+- <a id="src-li-cwe"></a>[Component Wise Evaluation](https://developers.llamaindex.ai/python/framework/optimizing/evaluation/component_wise_evaluation/) — `[LI-CWE]` · owns the post-fine-tuning out-of-domain degradation check, the data-drift framing of that check, and BEIR as the instrument for it.
+- <a id="src-sentbert19"></a>*Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks* — Nils Reimers, Iryna Gurevych · arXiv:1908.10084 (EMNLP 2019) · [arxiv.org/abs/1908.10084](https://arxiv.org/abs/1908.10084) — `[SENTBERT19]` · owns the siamese/triplet training structure and cosine-comparable sentence embeddings; cited here only as the training substrate a domain fine-tune re-trains · mirrored for local self-containment; **M4** owns the survey of the embedding-model architecture.
+- <a id="src-dpr20"></a>*Dense Passage Retrieval for Open-Domain Question Answering* — owned by **M4**, surveyed there; cited here only by key as the owner of the bi-encoder architecture and its contrastive objective, which this module trains rather than re-derives — `[DPR20]`.
+- <a id="src-hardneg20"></a>*RocketQA: An Optimized Training Approach to Dense Passage Retrieval for Open-Domain Question Answering* — Yingqi Qu, Yuchen Ding, Jing Liu, Kai Liu, Ruiyang Ren, Wayne Xin Zhao, Daxiang Dong, Hua Wu, Haifeng Wang · arXiv:2010.08191 (NAACL 2021) · [arxiv.org/abs/2010.08191](https://arxiv.org/abs/2010.08191) — `[HARDNEG20]` · owns cross-batch negatives, denoised hard negatives, and data augmentation as the three training contributions.
+- <a id="src-giant21"></a>*GPL: Generative Pseudo Labeling for Unsupervised Domain Adaptation of Dense Retrieval* — Kexin Wang, Nandan Thakur, Nils Reimers, Iryna Gurevych · arXiv:2112.07577 (NAACL 2022) · [arxiv.org/abs/2112.07577](https://arxiv.org/abs/2112.07577) — `[GIANT21]` · owns generative pseudo-labelling, the query-generator plus cross-encoder construction, the up-to-9.3-nDCG@10 domain-adaptation result, and the negative result that only three of six pre-training methods improved retrieval.
+- <a id="src-fn24"></a>*Mitigating the Impact of False Negatives in Dense Retrieval with Contrastive Confidence Regularization* — Shiqi Wang, Yeqin Zhang, Cam-Tu Nguyen · arXiv:2401.00165 (AAAI 2024) · [arxiv.org/abs/2401.00165](https://arxiv.org/abs/2401.00165) — `[FN24]` · owns the false-negative problem statement for hard-negative sampling and the contrastive confidence regulariser for the NCE loss.
+- <a id="src-hnm25"></a>*Hard Negative Mining for Domain-Specific Retrieval in Enterprise Systems* — Hansa Meghwani, Amit Agarwal, Priyaranjan Pattnayak, Hitesh Laxmichand Patel, Srikant Panda · arXiv:2505.18366 (ACL 2025) · [arxiv.org/abs/2505.18366](https://arxiv.org/abs/2505.18366) — `[HNM25]` · owns the enterprise hard-negative-mining framework with multi-embedding dimensionality reduction and its MRR improvements.
+- <a id="src-fmteb24"></a>*Do We Need Domain-Specific Embedding Models? An Empirical Investigation* — Yixuan Tang, Yi Yang · arXiv:2409.18511 (2024) · [arxiv.org/abs/2409.18511](https://arxiv.org/abs/2409.18511) — `[FMTEB24]` · owns FinMTEB, the measured general-model performance drop on a domain benchmark, and the non-correlation between MTEB and domain-benchmark performance.
+- <a id="src-adapter23"></a>*Parameter-Efficient Sparse Retrievers and Rerankers using Adapters* — Vaishali Pal, Carlos Lassance, Hervé Déjean, Stéphane Clinchant · arXiv:2303.13220 (ECIR 2023) · [arxiv.org/abs/2303.13220](https://arxiv.org/abs/2303.13220) — `[ADAPTER23]` · owns adapter-based domain adaptation for sparse retrievers and rerankers, the outperform-fully-fine-tuned-dense result, and knowledge sharing between rerankers and first-stage rankers.
 
 **Unsupported (synthetic, no located source):** the LogiTrack DG-stratum run, the UN3480/SoC query
 narrative, the eight-week fine-tuning aftermath, the 2,000- and 3,000-pair lab sizes, and every
@@ -478,7 +490,7 @@ The five tradeoff-ledger entries are design decisions argued in this file. Three
 mechanisms argued here rather than findings: (a) that synthetic-only training teaches general-purpose
 paraphrase transfer rather than domain-jargon transfer, which follows from the construction of the
 pairs but is not measured in any source cited — the sources report *that* synthetic-pair
-domain adaptation works [GIANT21] without decomposing its effect by query vocabulary; (b) that a
+domain adaptation works [[GIANT21]](#src-giant21) without decomposing its effect by query vocabulary; (b) that a
 document-level holdout is required because chunks of the same document share nearly all their text,
 argued from M3's chunking behaviour and not stated in a source; (c) that the mixed synthetic/real
 ratio is the constraint that matters, argued from the real-query labelling budget rather than an

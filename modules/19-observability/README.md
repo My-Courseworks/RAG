@@ -52,22 +52,22 @@ Attributability is the requirement, and it is stricter than "we have traces." A 
 other cause.** The framework gives the mechanism two generational surfaces, and you have to know which one
 you are on: observability "is now being handled via the `instrumentation` module (available in
 v0.10.20 and later)," while "a lot of the tooling and integrations mentioned in this page use our legacy
-`CallbackManager` or don't use `set_global_handler`" [LI-OB]. The instrumentation module's vocabulary is
+`CallbackManager` or don't use `set_global_handler`" [[LI-OB]](#src-li-ob). The instrumentation module's vocabulary is
 exactly the right one for this problem — an `Event` is "a single moment in time that a certain occurrence
 took place," a `Span` "represents the execution flow of a particular part in the application's code and
 thus contains `Event`s," `SpanHandler` is "responsible for the entering, exiting, and dropping (i.e.,
 early exiting due to error) of `Span`s," and a `Dispatcher` "emits `Event`s as well as signals to
-enter/exit/drop a `Span`" [LI-IN]. Handlers attach to a dispatcher, and dispatchers are **hierarchical**:
+enter/exit/drop a `Span`" [[LI-IN]](#src-li-in). Handlers attach to a dispatcher, and dispatchers are **hierarchical**:
 "all `dispatcher`s except for the root `dispatcher` [have] a parent, and when handling events or span's
-can propagate them to its parent as well (this is the default behaviour)" [LI-IN] — so a root-level handler
+can propagate them to its parent as well (this is the default behaviour)" [[LI-IN]](#src-li-in) — so a root-level handler
 sees everything and a module-level handler sees one module, which is how you get per-stage attribution
 without a global god-object.
 
 The legacy surface is still the one most codebases actually use, and its event types map one-to-one onto
 the stages you must attribute: `CHUNKING`, `NODE_PARSING`, `EMBEDDING`, `LLM`, `QUERY`, `RETRIEVE`,
-`SYNTHESIZE`, `TREE`, `SUB_QUESTION` [LI-CB]. That list is effectively the minimum span set — and note
+`SYNTHESIZE`, `TREE`, `SUB_QUESTION` [[LI-CB]](#src-li-cb). That list is effectively the minimum span set — and note
 that it is **ingest-side as well as query-side**: `CHUNKING`, `NODE_PARSING`, and `EMBEDDING` fire during
-indexing [LI-CB], which is what makes the opening scene's failure attributable at all. An observability
+indexing [[LI-CB]](#src-li-cb), which is what makes the opening scene's failure attributable at all. An observability
 stack scoped to query time cannot see the incident, because the incident happened at 14:07 in an
 ingestion job that exited zero.
 
@@ -96,6 +96,13 @@ Two attributes on that diagram are the ones teams omit and then cannot diagnose 
   is absent and its latency and cost are near zero. A dashboard that does not segment by cache outcome
   will read a cache hit rate change as a performance improvement.
 
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — mixed PDFs add extraction paths, and ingest spans must tell them apart.
+> - Tag each page with `extraction_path`: text layer, OCR, table extractor, or vision caption.
+> - Log per-page quality signals: OCR word confidence, table cell count, figure count.
+>   - Tesseract already emits per-word confidence (`conf` column in TSV output) ([docs](https://tesseract-ocr.github.io/tessdoc/Command-Line-Usage.html)).
+> - Vision-model captions are LLM calls at ingest: give them `model_id`, tokens, cost (→ [M18](../18-cost-and-latency/README.md)).
+> - Which parser to pick is M3's and M14's call ([M3](../03-parsing-and-chunking/README.md), [M14](../14-ingestion-at-scale/README.md)); M19 only makes the choice visible.
+
 ### Logging the retrieved node set with scores and lineage
 
 The retrieved node set is the single most valuable artifact in the trace and the single most dangerous one
@@ -114,7 +121,7 @@ Log per query, at minimum:
 | `doc_ids[]` and `ref_doc_id` lineage | Maps a bad node back to the document that produced it, which is how an *ingest* bug is found from a *query* symptom | Joins to the docstore; no duplication needed |
 | `node_text` (or a hash of it) | Lets a reviewer read the evidence without a second query | **The sensitive field.** Retain the hash long; retain the text under the short window and under M17's isolation rules |
 | `acl_denied_ids[]` | Distinguishes "not retrieved" from "retrieved and denied" — a distinction with completely different owners (M6 vs M17) | IDs only |
-| Token counts per call (`prompt`, `completion`, `embedding`) | Binds the trace to M18's cost waterfall, so a cost anomaly is attributable to a span rather than to the invoice | Cheap; the framework's `TokenCountingHandler` exposes exactly these per-call via `TokenCountingEvent` and in total, cumulative until `reset_counts()` [LI-TC] |
+| Token counts per call (`prompt`, `completion`, `embedding`) | Binds the trace to M18's cost waterfall, so a cost anomaly is attributable to a span rather than to the invoice | Cheap; the framework's `TokenCountingHandler` exposes exactly these per-call via `TokenCountingEvent` and in total, cumulative until `reset_counts()` [[LI-TC]](#src-li-tc) |
 
 Note the last row. Without it, a permission filter narrowing results and a retriever failing to find
 results look identical in every aggregate metric, and the two have opposite fixes.
@@ -161,16 +168,16 @@ designing a dashboard around proxies: harvesting implicit feedback from interact
 because "asking for direct user feedback can be disruptive," and the results are "mixed... this helps in
 short human-designed questions (MTBench) but not on longer and more complex questions (WildBench)," the
 paper's own summary being "an in-depth study of implicit user feedback, showing its potential and
-limitations" [UFF25]. **The signals are a lens on users, not a measurement of quality** — the paper's title
+limitations" [[UFF25]](#src-uff25). **The signals are a lens on users, not a measurement of quality** — the paper's title
 says so, and the mixed result is the finding.
 
 > **LlamaIndex at a glance:** the framework ships the *plumbing* for online signals but not the signals.
 > `set_global_handler("<handler_name>", **kwargs)` wires an integration in one line, with `kwargs` passed
-> through to the underlying handler [LI-OB], and the integrations span hosted and self-hosted backends:
+> through to the underlying handler [[LI-OB]](#src-li-ob), and the integrations span hosted and self-hosted backends:
 > OpenTelemetry (exportable to Jaeger, Zipkin, or Prometheus), LlamaTrace/Arize Phoenix, SigNoz, W&B Weave,
-> MLflow, OpenLLMetry, Langfuse, Literal AI, Opik, Argilla, Agenta, Confident AI, and Maxim [LI-OB].
+> MLflow, OpenLLMetry, Langfuse, Literal AI, Opik, Argilla, Agenta, Confident AI, and Maxim [[LI-OB]](#src-li-ob).
 > Several of the newer ones route through `instrumentation` rather than callbacks, and one doc note is
-> worth copying into your own design: embedding calls are not traced by every integration [LI-OB] — which
+> worth copying into your own design: embedding calls are not traced by every integration [[LI-OB]](#src-li-ob) — which
 > means the stage that failed in the opening scene is not necessarily visible in the default trace you
 > get from your vendor. **Audit which spans your integration actually emits before trusting it as the
 > diagnostic surface.**
@@ -183,7 +190,7 @@ says so, and the mixed result is the finding.
 
 Concept drift is "unforeseeable changes in the underlying distribution of streaming data over time," and
 the field's established framework has three components — "concept drift detection, concept drift
-understanding, and concept drift adaptation" [DRIFT]. Two of those three transfer to RAG with a twist,
+understanding, and concept drift adaptation" [[DRIFT]](#src-drift). Two of those three transfer to RAG with a twist,
 and one does not transfer at all:
 
 | Drift kind | What drifts | Detectable from | Transfers cleanly? |
@@ -202,7 +209,7 @@ traffic and paying for labels.
 
 If you cite detectors for input drift, cite them for what they are. Note also that established drift work
 carries an important warning by omission: "data analysis has revealed that machine learning in a concept
-drift environment will result in poor learning results if the drift is not addressed" [DRIFT] — adaptation
+drift environment will result in poor learning results if the drift is not addressed" [[DRIFT]](#src-drift) — adaptation
 in that literature means *retraining the model*. For RAG, adaptation means re-chunking, re-embedding,
 re-tuning filters, or changing the corpus (→ M14, → M20). The taxonomy transfers; the remedy does not.
 
@@ -234,6 +241,13 @@ decision, not a number chosen to stop the noise.**
 | **Cache-hit-rate collapse** | Cache outcome mix (→ M18) | 15 min | A sudden drop means keys changed, ACL hashes changed, or the cache broke; cost and latency both move | Investigate; the cost alert will fire first |
 | **Faithfulness sampled score** | M13's evaluator on a 1% sample | Daily | Alert on a *drop* below the trailing band | Investigate; note this alert did **not** fire in the opening scene, because faithfulness went *up* |
 | **Cost against the M18 waterfall** | Actual vs the committed line, per component | Daily | Alert on any component exceeding its waterfall allocation by 20% | Re-derive the waterfall (→ M18) |
+
+> **Multimodal inputs** ($\color{red}\text{to be discussed}$) — one characters-per-page bound is wrong for mixed pages.
+> - Scanned pages have a near-empty text layer by design: assert on the OCR output, not the text layer.
+> - Table- and figure-heavy pages have low prose density: set bounds per page type, not per document.
+> - One repair for the opening scene: render pages 44–63 and OCR them, skipping the broken text layer.
+> - Add a golden-set stratum for answers that live in tables or figures (→ [M13](../13-evaluation/README.md)).
+> - Image/audio embeddings and page-image retrieval are deferred ([syllabus §1](../../syllabus.md#1-scope-knobs-frozen)).
 
 Two of these are worth generalizing, because they are the ones that catch the class of failure this
 module exists for: **an ingest-time assertion is worth more than any post-hoc alert**, because it converts
@@ -392,7 +406,7 @@ you have none. The deliverable is a set of alerts with owners and a feedback loo
    missing: **`index_version`** on every retrieval span and **ACL-denial counts** on the authorization
    span (→ M17). If you are on the legacy callback surface, note the event types it gives you
    (`CHUNKING`, `NODE_PARSING`, `EMBEDDING`, `LLM`, `QUERY`, `RETRIEVE`, `SYNTHESIZE`, `TREE`,
-   `SUB_QUESTION` [LI-CB]) and which stages they leave dark.
+   `SUB_QUESTION` [[LI-CB]](#src-li-cb)) and which stages they leave dark.
 4. **Classify every online signal you collect as a proxy and name its bias.** For each of thumbs,
    regeneration, citation-click, abandonment, and escalation: what it plausibly proxies, the specific bias,
    and what it structurally cannot see. Then state which *one* of them you would use as a secondary
@@ -429,7 +443,7 @@ is why the offline stratum floor, not the thumbs-down rate, is the alert that pa
   can be disruptive; thus, we study harvesting implicit user feedback from user-LM interaction logs" — and
   its results are "mixed... this helps in short human-designed questions (MTBench) but not on longer and
   more complex questions (WildBench)," concluding with "an in-depth study of implicit user feedback,
-  showing its potential and limitations" [UFF25]. Read the direction of the negative result: the signals
+  showing its potential and limitations" [[UFF25]](#src-uff25). Read the direction of the negative result: the signals
   were **less** useful precisely on the longer, more complex questions — which is the class LogiTrack's
   global and multi-hop questions belong to (→ M16), and the class where a wrong answer is most expensive.
   **What to change:** use proxies as a monitoring layer and a source of hypotheses, never as the primary
@@ -437,9 +451,9 @@ is why the offline stratum floor, not the thumbs-down rate, is the alert that pa
   should be an offline stratified metric (M13's harness), and the proxies should feed the golden set
   (§"the feedback loop") rather than the pager.
 - **"Drift detection is a solved problem you can adopt."** The drift literature's framework — detection,
-  understanding, adaptation — is well established [DRIFT], and the warning it carries is real: "data
+  understanding, adaptation — is well established [[DRIFT]](#src-drift), and the warning it carries is real: "data
   analysis has revealed that machine learning in a concept drift environment will result in poor learning
-  results if the drift is not addressed" [DRIFT]. But the framework assumes a stream with a measurable
+  results if the drift is not addressed" [[DRIFT]](#src-drift). But the framework assumes a stream with a measurable
   *error rate* and an adaptation path that is *retraining*. RAG has neither: live traffic carries no
   labels, and you cannot retrain a pinned vendor's generator. **What to change:** adopt the detection
   component and adapt the rest. What you can honestly monitor online is **input drift** (query and
@@ -452,7 +466,7 @@ is why the offline stratum floor, not the thumbs-down rate, is the alert that pa
 - **"Fine-grained evaluation metrics correlate better with humans, so use them online."** RAGChecker's
   meta-evaluation reports that it "has significantly better correlations with human judgments than other
   evaluation metrics," and demonstrates the framework by evaluating "8 RAG systems" and revealing "insightful
-  patterns and trade-offs in the design choices of RAG architectures" [RAGCHECKER24]. The claim is
+  patterns and trade-offs in the design choices of RAG architectures" [[RAGCHECKER24]](#src-ragchecker24). The claim is
   well-supported and the framework is the right instrument for the offline gate. **What to change:** read
   the cost. Claim-level diagnostic metrics require a judge call per claim, and running them on 100% of
   8,500 daily queries is a new line in M18's waterfall — the evaluation component M18 prices at
@@ -473,13 +487,13 @@ is why the offline stratum floor, not the thumbs-down rate, is the alert that pa
 
 ## Sources
 
-- [Observability](https://developers.llamaindex.ai/python/framework/module_guides/observability/) — `[LI-OB]` · owns `set_global_handler`, the integration catalogue (OpenTelemetry, LlamaTrace/Arize Phoenix, SigNoz, W&B Weave, MLflow, OpenLLMetry, Langfuse, Literal AI, Opik, Argilla, Agenta, Confident AI, Maxim), the note that observability moved to the `instrumentation` module in v0.10.20 while legacy `CallbackManager` integrations remain, and the per-integration gaps (e.g. embedding calls not traced).
-- [Instrumentation](https://developers.llamaindex.ai/python/framework/module_guides/observability/instrumentation/) — `[LI-IN]` · owns `Event`, `EventHandler`, `Span`, `SpanHandler`, `Dispatcher`, the `span_enter` / `span_exit` / `span_drop` signals and `@dispatcher.span` decorator, and the parent-propagating dispatcher hierarchy.
-- [Callbacks](https://developers.llamaindex.ai/python/framework/module_guides/observability/callbacks/) — `[LI-CB]` · owns the legacy `CallbackManager` surface, the `CBEventType` list (`CHUNKING`, `NODE_PARSING`, `EMBEDDING`, `LLM`, `QUERY`, `RETRIEVE`, `SYNTHESIZE`, `TREE`, `SUB_QUESTION`), `LlamaDebugHandler`, and the token-counting handler.
-- [Callbacks — Token Counting Handler](https://developers.llamaindex.ai/python/examples/observability/tokencountinghandler/) — `[LI-TC]` · owns the token telemetry that binds the query span to M18's cost waterfall (`total_embedding_token_count`, `prompt_llm_token_count`, `completion_llm_token_count`, per-call `TokenCountingEvent`, cumulative-until-reset).
-- *User Feedback in Human-LLM Dialogues: A Lens to Understand Users But Noisy as a Learning Signal* — Yuhan Liu, Michael J.Q. Zhang, Eunsol Choi · arXiv:2507.23158 (v2, 2025; EMNLP) · [arxiv.org/abs/2507.23158](https://arxiv.org/abs/2507.23158) — `[UFF25]` · owns the study of implicit user feedback from interaction logs and its mixed/negative result on long, complex questions.
-- *Learning under Concept Drift: A Review* — Jie Lu, Anjin Liu, Fan Dong, Feng Gu, Joao Gama, Guangquan Zhang · arXiv:2004.05785 (2020; journal reference IEEE TKDE 31(12):2346–2363) · [arxiv.org/abs/2004.05785](https://arxiv.org/abs/2004.05785) — `[DRIFT]` · owns the concept-drift framework (detection, understanding, adaptation), the taxonomy, and the benchmark/synthetic dataset inventory. *(The canonical *A survey on concept drift adaptation* by Gama, Žliobaitė, Bifet, Pechenizkiy & Bouchachia is ACM Computing Surveys, DOI 10.1145/2523813; this review was cited instead because it is the version whose full author list and record could be fetched and verified directly.)*
-- *RAGChecker: A Fine-grained Framework for Diagnosing Retrieval-Augmented Generation* — Dongyu Ru, Lin Qiu, Xiangkun Hu, Tianhang Zhang, Peng Shi, Shuaichen Chang, Cheng Jiayang, Cunxiang Wang, Shichao Sun, Huanyu Li, Zizhao Zhang, Binjie Wang, Jiarong Jiang, Tong He, Zhiguo Wang, Pengfei Liu, Yue Zhang, Zheng Zhang · arXiv:2408.08067 (v2, 2024) · [arxiv.org/abs/2408.08067](https://arxiv.org/abs/2408.08067) — `[RAGCHECKER24]` · owns the fine-grained retrieval/generation diagnostic metrics and the meta-evaluation reporting significantly better correlation with human judgments than other metrics.
+- <a id="src-li-ob"></a>[Observability](https://developers.llamaindex.ai/python/framework/module_guides/observability/) — `[LI-OB]` · owns `set_global_handler`, the integration catalogue (OpenTelemetry, LlamaTrace/Arize Phoenix, SigNoz, W&B Weave, MLflow, OpenLLMetry, Langfuse, Literal AI, Opik, Argilla, Agenta, Confident AI, Maxim), the note that observability moved to the `instrumentation` module in v0.10.20 while legacy `CallbackManager` integrations remain, and the per-integration gaps (e.g. embedding calls not traced).
+- <a id="src-li-in"></a>[Instrumentation](https://developers.llamaindex.ai/python/framework/module_guides/observability/instrumentation/) — `[LI-IN]` · owns `Event`, `EventHandler`, `Span`, `SpanHandler`, `Dispatcher`, the `span_enter` / `span_exit` / `span_drop` signals and `@dispatcher.span` decorator, and the parent-propagating dispatcher hierarchy.
+- <a id="src-li-cb"></a>[Callbacks](https://developers.llamaindex.ai/python/framework/module_guides/observability/callbacks/) — `[LI-CB]` · owns the legacy `CallbackManager` surface, the `CBEventType` list (`CHUNKING`, `NODE_PARSING`, `EMBEDDING`, `LLM`, `QUERY`, `RETRIEVE`, `SYNTHESIZE`, `TREE`, `SUB_QUESTION`), `LlamaDebugHandler`, and the token-counting handler.
+- <a id="src-li-tc"></a>[Callbacks — Token Counting Handler](https://developers.llamaindex.ai/python/examples/observability/tokencountinghandler/) — `[LI-TC]` · owns the token telemetry that binds the query span to M18's cost waterfall (`total_embedding_token_count`, `prompt_llm_token_count`, `completion_llm_token_count`, per-call `TokenCountingEvent`, cumulative-until-reset).
+- <a id="src-uff25"></a>*User Feedback in Human-LLM Dialogues: A Lens to Understand Users But Noisy as a Learning Signal* — Yuhan Liu, Michael J.Q. Zhang, Eunsol Choi · arXiv:2507.23158 (v2, 2025; EMNLP) · [arxiv.org/abs/2507.23158](https://arxiv.org/abs/2507.23158) — `[UFF25]` · owns the study of implicit user feedback from interaction logs and its mixed/negative result on long, complex questions.
+- <a id="src-drift"></a>*Learning under Concept Drift: A Review* — Jie Lu, Anjin Liu, Fan Dong, Feng Gu, Joao Gama, Guangquan Zhang · arXiv:2004.05785 (2020; journal reference IEEE TKDE 31(12):2346–2363) · [arxiv.org/abs/2004.05785](https://arxiv.org/abs/2004.05785) — `[DRIFT]` · owns the concept-drift framework (detection, understanding, adaptation), the taxonomy, and the benchmark/synthetic dataset inventory. *(The canonical *A survey on concept drift adaptation* by Gama, Žliobaitė, Bifet, Pechenizkiy & Bouchachia is ACM Computing Surveys, DOI 10.1145/2523813; this review was cited instead because it is the version whose full author list and record could be fetched and verified directly.)*
+- <a id="src-ragchecker24"></a>*RAGChecker: A Fine-grained Framework for Diagnosing Retrieval-Augmented Generation* — Dongyu Ru, Lin Qiu, Xiangkun Hu, Tianhang Zhang, Peng Shi, Shuaichen Chang, Cheng Jiayang, Cunxiang Wang, Shichao Sun, Huanyu Li, Zizhao Zhang, Binjie Wang, Jiarong Jiang, Tong He, Zhiguo Wang, Pengfei Liu, Yue Zhang, Zheng Zhang · arXiv:2408.08067 (v2, 2024) · [arxiv.org/abs/2408.08067](https://arxiv.org/abs/2408.08067) — `[RAGCHECKER24]` · owns the fine-grained retrieval/generation diagnostic metrics and the meta-evaluation reporting significantly better correlation with human judgments than other metrics.
 
 **Unsupported (synthetic, no located source):** the Hapag-Lloyd revision, the 210-page PDF, the
 pages 44–63 font-subset failure, the 1,180 garbage chunks, every figure in the before/after table
@@ -493,7 +507,7 @@ argued here as a consequence of how faithfulness is defined against a given cont
 result in this module; the same caveat applies to the claim that it generalizes. The claim that a
 retrieval margin collapses before recall does is a monitoring heuristic argued here, not measured. No
 observability vendor's retention defaults, span coverage, or pricing are asserted or verified; the
-per-integration gap about embedding calls is read off the framework's own note [LI-OB] and must be
+per-integration gap about embedding calls is read off the framework's own note [[LI-OB]](#src-li-ob) and must be
 re-checked against the integration you deploy, since integrations change.
 
 **Verification note:** 🟡 *pending* — Step 7 (memory-less logic review) and Step 8 (literature survey) not yet run on this module.
