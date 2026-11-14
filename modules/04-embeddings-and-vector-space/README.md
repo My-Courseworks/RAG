@@ -60,14 +60,16 @@ somewhere else entirely. That is **F4 · representation mismatch**: the user's w
 words never met in the model's training data, and a better average score on someone else's
 benchmark does not make them meet.
 
-Worse, the migration quietly broke something else. LogiTrack's ingest drops a new chunk when it
-scores above **0.98** cosine against a chunk already indexed — the team's guard against repeated
-boilerplate and contracts re-uploaded under new filenames. The team had picked 0.98 by eye on the
-old model, whose scores crowd into the top of the range: true duplicates scored 0.985 and up. The
-new model spreads its scores out, and the same duplicates now land around 0.93–0.985. Almost none
-cleared 0.98, so a week of ingest silently kept nearly every duplicate. Nothing errored; the index
-just grew. ([Setting that cutoff properly](#worked-setting-a-similarity-threshold-from-two-distributions)
-is worked below.)
+Worse, the migration exposed something the old setup had been getting wrong all along. LogiTrack's
+ingest drops a new chunk when it scores above a cosine cutoff against a chunk already indexed — the
+team's guard against repeated boilerplate and contracts re-uploaded under new filenames. They had
+picked the cutoff by eye on the old model, just under where re-uploads scored. The new model spreads
+its scores differently, and duplicates started slipping past. Chasing that, they found
+the bigger problem: the same cutoff had always been dropping **revised** clauses. The 4.0% DG
+surcharge was discarded as a "duplicate" of the 3.5% one it replaced, because one changed figure
+barely moves an embedding. Nothing errored either way.
+([Measuring that cutoff](#worked-setting-a-similarity-threshold-from-two-distributions) is worked
+below.)
 
 > **Failure mode (the module in one line):** treating the embedding model as a **vendor choice
 > selected by leaderboard rank** rather than as a learned function whose objective, geometry, and
@@ -301,14 +303,244 @@ retrospectively expensive in exactly the way chunking is ([→ M3 · which decis
 ## The cone effect: raw embeddings are not isotropic
 
 The intuition that unrelated texts sit near the origin and related texts sit near each other is
-false. Ethayarajh measured the geometry of contextual representations across BERT, ELMo, and GPT-2
-and found that *"the contextualized representations of all words are not isotropic in any layer of
-the contextualizing model"* [[ETH19]](#src-eth19). Gao et al. identified the same phenomenon during language-model
-training: with weight tying and large datasets, *"most of the learnt word embeddings tend to
-degenerate and be distributed into a narrow cone, which largely limits the representation power of
-word embeddings"* [[GAO19]](#src-gao19). SimCSE's analysis connects the two to retrieval directly — the
-contrastive objective is what *"regularizes pre-trained embeddings' anisotropic space to be more
-uniform"* [[SIMCSE21]](#src-simcse21).
+false.
+
+- Ethayarajh measured the geometry of contextual representations across BERT (BERT gives vector per token, cross-encoder based similarity score was just a usecase), ELMo, and GPT-2
+  and found that *"the contextualized representations of all words are not isotropic in any layer of
+  the contextualizing model"* [[ETH19]](#src-eth19).
+  - **Expected vs found.** Expected *isotropic*, "directionally uniform", so random pairs average a
+    cosine of 0. Found the average cosine between randomly sampled words well above 0 in almost every
+    layer, and in GPT-2's last layer "any two words have on average an almost perfect cosine
+    similarity" [[ETH19]](#src-eth19).
+  - **How it was measured.** Sentences from the SemEval STS tasks (2012–2016) went through each model,
+    and every word occurrence's per-layer vector was kept. The cone shows up in the baseline: the
+    average cosine between randomly sampled words from different contexts [[ETH19]](#src-eth19).
+
+    <details>
+    <summary><b>Why a high average cosine means a cone, in any number of dimensions</b> (this course's derivation, not the paper's)</summary>
+
+    The paper takes "cone" as the standard reading of a high average cosine, citing earlier work
+    [[ETH19]](#src-eth19). This is why that reading holds, for any D.
+
+    - **Angles work in any D.** cos(x, y) = x · y / (‖x‖ ‖y‖) is computed the same way in 3 dimensions
+      or 768. A cone is defined by angles: every vector lies within some angle θ of one axis. So "is it
+      a cone?" becomes "are the angles small?", which you can check with numbers alone, without a picture.
+    - **The measurement: average pairwise cosine.** For n vectors x₁ … xₙ:
+
+      c̄ = 1 / (n(n − 1)) · Σᵢ Σⱼ≠ᵢ cos(xᵢ, xⱼ)
+
+      Each vector's cosine with itself (always 1) is left out. Ethayarajh's self-similarity has the
+      same form. In an isotropic space c̄ ≈ 0, since random directions in high D are nearly
+      perpendicular.
+    - **A shortcut for unit vectors.** With ‖xᵢ‖ = 1, cosine is the dot product, and
+      ‖Σᵢ xᵢ‖² = n + Σᵢ Σⱼ≠ᵢ xᵢ · xⱼ (the n is the self-pairs). So, with m = (1/n) Σᵢ xᵢ the mean vector:
+
+      c̄ = (‖Σᵢ xᵢ‖² − n) / (n(n − 1)) = (n‖m‖² − 1) / (n − 1), which tends to ‖m‖² as n grows
+
+      That's one sum over the vectors, O(n·D), instead of comparing every pair, O(n²·D).
+    - **The mean's direction is the cone's axis.** For any unit direction u, the average cosine
+      between the vectors and u is (1/n) Σᵢ xᵢ · u = m · u, which is at most ‖m‖ (Cauchy–Schwarz). It
+      equals ‖m‖ only when u points along m. So the mean direction is the axis the vectors are closest
+      to on average, and their average cosine to it is exactly ‖m‖.
+    - **Put together:** average cos(xᵢ, axis) = ‖m‖ = √(1/n + ((n − 1)/n) · c̄) ≈ √c̄.
+      - **The signs aren't lost.** ‖m‖ is a length and never negative, but m is a vector *sum*:
+        vectors on opposite sides cancel inside Σᵢ xᵢ before its length is taken. The identity
+        n²‖m‖² = n + Σᵢ Σⱼ≠ᵢ cos(xᵢ, xⱼ) holds with the signs, so negative cosines shrink ‖m‖. Tiny
+        cases:
+
+        | Vectors | Pairwise cosines | c̄ directly | Σᵢ xᵢ | (n‖m‖² − 1)/(n − 1) |
+        |---|---|---|---|---|
+        | x, x | +1 | **+1** | 2x, so ‖m‖ = 1 | (2 · 1 − 1)/1 = **+1** |
+        | x, −x | −1 | **−1** | 0, so ‖m‖ = 0 | (0 − 1)/1 = **−1** |
+        | x, x, −x, −x (two-sided) | 2 pairs at +1, 4 at −1 | (2 − 4)/6 = **−⅓** | 0, so ‖m‖ = 0 | (0 − 1)/3 = **−⅓** |
+        | four vectors all near x (one cone) | all about +1 | **≈ +1** | ≈ 4x, so ‖m‖ ≈ 1 | **≈ +1** |
+
+        A two-sided shape gives ‖m‖ ≈ 0 and c̄ ≤ 0; one cone gives both near 1. An *unsigned* measure,
+        such as the average of |cos| or the first principal component, would score both shapes high,
+        which is why the signed average is the one that shows a cone.
+      - **One side, one cone.** The hyperplane through the origin perpendicular to m, which has D − 1
+        dimensions, splits the space in two. The cone sits in the half-space m points into. It flares
+        out in every direction *around* m, but as a whole it never wraps across to the other side. A
+        few outliers can cross; if every pair is positively correlated, as Gao et al. found
+        [[GAO19]](#src-gao19), the whole cloud fits on one side.
+      - **For the cone (c̄ > 0)**, a high average pairwise cosine means every vector, on average, hugs
+        that one axis:
+
+        | Average pairwise cosine c̄ | Average cosine to the axis, √c̄ | Roughly |
+        |---|---|---|
+        | 0 (isotropic) | 0 | 90°: no shared axis, the mean is near the origin |
+        | 0.6 | 0.77 | ~39° |
+        | 0.8 | 0.89 | ~27° |
+        | 0.99 | 0.995 | ~6°: a needle |
+
+    - **Two caveats.** √c̄ is the average *cosine* to the axis, not the cosine of the average angle, so
+      the degrees above are approximate. And it describes the typical vector: a few outliers can sit
+      well outside that angle.
+    - **Check it yourself:**
+
+      ```python
+      import numpy as np
+
+      def avg_pairwise_cosine(X):                            # X: (n, D), one embedding per row
+          X = X / np.linalg.norm(X, axis=1, keepdims=True)   # unit vectors
+          n, s = len(X), X.sum(axis=0)                       # s = Σ xᵢ
+          return (s @ s - n) / (n * (n - 1))
+
+      print(avg_pairwise_cosine(np.random.randn(10_000, 768)))   # isotropic: about 0
+      ```
+
+      On raw BERT token vectors from a few hundred random sentences, the same function returns a
+      clearly positive number: the cone, measured.
+
+    </details>
+  - **What "not isotropic" looks like.** *Isotropic* means "the same in every direction". Draw each
+    embedding as an arrow from the origin. In an isotropic space the arrows point every way and fill
+    the whole ball; normalized, their tips cover the entire sphere. Raw embeddings instead all lean
+    one way and fill a narrow **cone** with its apex at the origin; normalized, their tips crowd into
+    one small cap of the sphere. The cone's width sets the lowest cosine any pair can get: if every
+    pair is within about 46°, every cosine is at least 0.7.
+
+    ```
+           BALL: isotropic                   CONE: anisotropic (raw embeddings)
+           arrows point every way            arrows all lean one way
+
+              *    *    *                         *  *  *
+               \   |   /                           \ | /
+                \  |  /                             \|/
+          * ------ o ------ *                        o   <- apex at the origin
+                /  |  \
+               /   |   \
+              *    *    *
+
+       tips cover the whole sphere       tips crowd into one small cap of it
+       unrelated pair: cosine ~ 0        unrelated pair: cosine 0.6-0.8
+
+       o = the origin     * = one embedding vector's tip     lines = the vectors
+    ```
+
+    The real space has hundreds of dimensions, so it's a hypercone, but "every arrow within a narrow
+    angle of one direction" means the same thing in any number of dimensions.
+- Gao et al. identified the same phenomenon during language-model training: with weight tying and
+  large datasets, *"most of the learnt word embeddings tend to degenerate and be distributed into a
+  narrow cone, which largely limits the representation power of word embeddings"* [[GAO19]](#src-gao19).
+  - **Expected vs found.** Expected embeddings "diversely distributed around the origin", as word2vec's
+    are; word embeddings "should be widely distributed to represent different semantic meanings". Found
+    a narrow cone in a 2-D projection, with any two words' embeddings positively correlated
+    [[GAO19]](#src-gao19).
+  - <details>
+    <summary><b>How a language model predicts the next word, in 7 steps</b></summary>
+
+    A toy model with a 5-word vocabulary (V = 5: `the, parcel, is, late, early`), d = 3 numbers per
+    vector, input **"the parcel is"**, predicting the next word.
+
+    1. **Tokens to IDs:** "the parcel is" becomes [0, 1, 2].
+    2. **Look up the input vectors** in the embedding table E, which has one row per vocabulary word:
+
+       | Word | Row of E (= row of W, under tying) |
+       |---|---|
+       | the | [0.1, 0.2, 0.0] |
+       | parcel | [0.3, 0.1, 0.2] |
+       | is | [0.2, 0.0, 0.1] |
+       | late | [0.8, 0.0, 0.5] |
+       | early | [0.6, 0.3, −0.4] |
+
+       The three input tokens take the rows for "the", "parcel" and "is".
+    3. **Run the transformer layers.** Out come three contextual vectors, **one per input token**:
+       h<sub>the</sub>, h<sub>parcel</sub>, h<sub>is</sub>.
+    4. **Pick the position whose prediction you want.** For "what comes next?", that's the last one,
+       h<sub>is</sub>, since it has seen the whole input. Say h<sub>is</sub> = [0.9, 0.1, 0.4].
+    5. **Score every vocabulary word against that one h:** a dot product with each row of the output
+       matrix W. Doing all of them at once is the product W · h.
+
+       | Word | h · w<sub>v</sub> | Logit |
+       |---|---|---|
+       | the | 0.9·0.1 + 0.1·0.2 + 0.4·0.0 | 0.11 |
+       | parcel | 0.9·0.3 + 0.1·0.1 + 0.4·0.2 | 0.36 |
+       | is | 0.9·0.2 + 0.1·0.0 + 0.4·0.1 | 0.22 |
+       | late | 0.9·0.8 + 0.1·0.0 + 0.4·0.5 | **0.92** |
+       | early | 0.9·0.6 + 0.1·0.3 + 0.4·(−0.4) | 0.41 |
+
+    6. **Softmax** turns the logits into probabilities: late **0.32**, early 0.19, parcel 0.18, is 0.16,
+       the 0.14.
+    7. **Pick "late"** (greedy; chat models usually sample from the probabilities instead). Append it
+       and repeat from step 3 for the word after.
+
+    **Which positions get scored:** when generating, only the last one. When training a GPT-style
+    model, every position at once, each predicting its own next token (h<sub>the</sub> → "parcel",
+    h<sub>parcel</sub> → "is", h<sub>is</sub> → "late"). In BERT, only the masked positions, each
+    predicting its hidden word.
+
+    </details>
+  - <details>
+    <summary><b>What weight tying means</b></summary>
+
+    - **Two tables, each V × d:** the input embedding table E (token ID → its vector, step 2 above)
+      and the output matrix W (h → one score per word, step 5). Without tying they're separate.
+    - **Weight tying sets W = E.** Each word's row is both how the word enters the model and the
+      template h is matched against to predict it. It halves those parameters: for BERT's vocabulary,
+      30,522 × 768 ≈ 23.4M weights saved.
+    - **Why it degenerates, Gao et al.'s argument:**
+      - **Each training step moves the rows and h at the same time**, from one loss, −log p<sub>y</sub>
+        for the correct word y. Nothing is held fixed:
+        - **The rows of W:** row v's gradient is (p<sub>v</sub> − 𝟙[v = y]) · h. So the correct word's row
+          moves toward the current h, and every other row moves away from it, in proportion to the
+          probability it wrongly took.
+        - **h:** its gradient is Σ<sub>v</sub> p<sub>v</sub> w<sub>v</sub> − w<sub>y</sub>, so h moves toward the
+          correct word's row and away from the probability-weighted average of all rows. h isn't a weight
+          itself. It changes because that gradient flows back into the transformer layers, and down to the
+          input rows of E, that produced it.
+        - **The asymmetry under tying:** the output side updates **every** row on every step, while the
+          input side updates only the rows of tokens that appeared in the input.
+      - A rare word is almost never the correct one, so its row is nearly always pushed away. If some
+        direction points away from all the hidden states at once (a "uniformly negative direction"), the
+        loss keeps falling as the row moves along it without limit [[GAO19]](#src-gao19). So the rare
+        words drift the same way.
+      - Under tying, that output-layer drift *is* the input embedding table. Most of the vocabulary is
+        rare, so most rows pile up along one direction: the cone.
+
+    </details>
+  - <details>
+    <summary><b>What "learnt word embeddings" means</b></summary>
+
+    - **They're the rows of E** (= the rows of W, under tying): one d-vector per vocabulary word,
+      looked up the same way in every sentence. They're parameters, not outputs. W · h in step 5 gives **logits**,
+      fresh scores for one position, which aren't embeddings.
+    - **"Learnt" means learned inside the model**: E and every Transformer weight start random and are
+      trained **together**, end to end, on the model's own task (English→German translation in Gao et
+      al.'s Figure 1(a)). Each step's loss updates all of them at once: the layers through h, and E
+      through both its output role and its input role.
+    - **How they differ from GloVe or word2vec:**
+
+      | | GloVe / word2vec | Gao et al.'s learnt word embeddings |
+      |---|---|---|
+      | Kind of object | a V × d table, one vector per word | a V × d table, one vector per word |
+      | Trained by | their own standalone objective, then loaded into other models | the model's own training loss, end to end |
+      | Tied to an output layer? | no: each keeps separate input and context vectors | yes, E = W |
+      | Shape of the space | spread around the origin (Gao et al.'s Figure 1(b): word2vec) | a narrow cone (Figure 1(a)) |
+
+      Gao et al. used word2vec as the healthy reference: the same kind of table, trained differently,
+      and not collapsed [[GAO19]](#src-gao19).
+
+    </details>
+  - <details>
+    <summary><b>Which vectors the cone studies looked at</b></summary>
+
+    | | Gao et al. (2019) | Ethayarajh (2019) |
+    |---|---|---|
+    | Vectors studied | the **trained embedding table**: the rows of E after training, one per vocabulary word, looked up the same way in every sentence | **contextual** hidden states: the h vectors of step 3, one per word *occurrence*, at every layer |
+    | Change with the sentence? | no | yes |
+    | Finding | the rows pile into a narrow cone [[GAO19]](#src-gao19) | the hidden states sit in a narrow cone in almost every layer [[ETH19]](#src-eth19) |
+
+    Two different objects, the same shape. The table degenerates (Gao), and the contextual vectors
+    built on top of it are anisotropic too (Ethayarajh). That link is the one SimCSE draws
+    [[SIMCSE21]](#src-simcse21).
+
+    </details>
+- SimCSE's analysis connects the two to retrieval directly — the contrastive objective is what
+  *"regularizes pre-trained embeddings' anisotropic space to be more uniform"* [[SIMCSE21]](#src-simcse21).
+  - **Expected vs found.** The target is embeddings that "scatter on the hypersphere", scored with a
+    *uniformity* metric borrowed from Wang & Isola (2020). Contrastive training moves pretrained
+    embeddings toward it [[SIMCSE21]](#src-simcse21).
 
 Why this is the single most practically dangerous fact in the module:
 
@@ -325,62 +557,172 @@ Why this is the single most practically dangerous fact in the module:
 - **"High similarity" is a distributional claim, not an absolute one.** The only defensible way to
   set any similarity threshold is empirically: embed a sample, plot the distribution for known
   pairs and known non-pairs, and read the threshold off the two distributions. That measurement is
-  [worked below](#worked-setting-a-similarity-threshold-from-two-distributions) and repeated with
-  real numbers in the M4 lab.
+  [worked below](#worked-setting-a-similarity-threshold-from-two-distributions) with real numbers
+  from the M4 lab, including the case where no threshold exists.
 
-The remedies are also contested. Centering or whitening embeddings before indexing is reported to
-reduce anisotropy and improve similarity-based tasks; the same literature reports that the effect is
-task- and layer-dependent [[ETH19]](#src-eth19), and none of the sources fetched for this module establishes
-whitening as a reliable retrieval win. Treat it as a hypothesis with a measurement attached, not a
-default — and note that whitening is a *transform* applied at embed time to both queries and
-documents, which means it is another entry on the re-embed list.
+**The remedies are also contested.** 
+- Centering (subtract the mean vector) or whitening embeddings before indexing is reported to
+  reduce anisotropy and improve similarity-based tasks; the same literature reports that the effect is
+  task- and layer-dependent [[ETH19]](#src-eth19), and none of the sources fetched for this module
+  establishes whitening as a reliable retrieval win.
+  - **Centering:** x̃ = x − μ, with μ the mean embedding of a corpus sample. It removes the cone's
+    shared axis (m in the cone derivation above), so random pairs average a cosine of about 0.
+
+    <details>
+    <summary><b>What centering does to the cone, pictured in 3-D</b></summary>
+
+    ![Animation in 4 steps on 150 real unit vectors. Step 1: the vectors crowd into an oval cap near the north pole; their mean m sits on the axis just inside the sphere (length 0.95). Step 2: every point shifts by −m. Step 3: the cloud sits around the origin, and seen from the origin the directions spread around it. Step 4: re-normalized onto the sphere, the points form a band around the equator, denser along x than y.](images/centering-cap-to-fan.gif)
+
+    *150 computed unit vectors: mean pairwise cosine 0.90 before centering, about 0 after. The
+    final band is denser along x because the cap was spread more along x. That leftover unevenness
+    is what whitening removes. [Static "before" frame](images/centering-cap.png).*
+
+    - **Before: the tips form a cap.** Every unit embedding sits on the sphere, and they crowd into a
+      cap, a curved patch of the surface around the axis.
+    - **The mean sits inside, under the cap.** It's the cap's centroid: on the axis, at length
+      ‖m‖ < 1, so inside the sphere. A tighter cap puts it closer to the surface.
+    - **The cap needn't be round.** The points can spread more one way than another, which matters
+      below.
+    - **Centering is a shift, not a rescale.** x − m moves every point by the same vector, so the
+      cloud keeps its shape and slides until its centroid sits at the origin.
+    - **Seen from the origin, the directions fan out** in all directions around it. But the points
+      are no longer on the unit sphere, so you re-normalize to put them back.
+    - **Four points show the catch:**
+
+      | | Before | After centering (x − m) | Re-normalized |
+      |---|---|---|---|
+      | a | (0.3, 0, 0.95) | (0.3, 0, 0) | (1, 0, 0) |
+      | b | (−0.3, 0, 0.95) | (−0.3, 0, 0) | (−1, 0, 0) |
+      | c | (0, 0.3, 0.95) | (0, 0.3, 0) | (0, 1, 0) |
+      | d | (0, −0.3, 0.95) | (0, −0.3, 0) | (0, −1, 0) |
+
+      Here m = (0, 0, 0.95). The average pairwise cosine goes from about 0.88 to −⅓, so the cone is
+      gone, but all four end up in the xy-plane: a **circle, not a sphere**.
+    - **Centering keeps only the directions the points varied in.** It removes the shared axis but
+      not the unevenness: a cap spread mostly one way becomes a band, not an evenly covered sphere.
+      Making the spread even is what whitening adds.
+
+    </details>
+  - **Whitening (PCA for embedding vectors) :** x̃ = (x − μ) · U · Λ<sup>−½</sup>, where Σ = U Λ Uᵀ is the covariance of the
+    centred vectors. Every principal direction is rescaled to unit variance, so the covariance becomes
+    I: isotropic by construction. Keeping only the top k columns of U also cuts dimensions.
+
+    <details>
+    <summary><b>Computing it: covariance, decomposition, and where PCA comes in</b></summary>
+
+    - **Covariance.** For n embeddings (rows of X), μ = (1/n) Σᵢ xᵢ and X<sub>c</sub> = X − μ. Then
+      Σ = X<sub>c</sub>ᵀ X<sub>c</sub> / (n − 1), a D × D matrix. Σ<sub>jk</sub> is how dimensions j and k
+      vary together, and the diagonal holds each dimension's variance. The n − 1 corrects for μ coming
+      from the same data.
+    - **Decomposition.** Σ = U Λ Uᵀ is Σ's eigendecomposition. Because Σ is symmetric and positive
+      semi-definite, it's also its SVD. U's columns are the principal directions, and Λ holds the
+      variance along each. Equivalently, from the data's SVD X<sub>c</sub> = U<sub>x</sub> S Vᵀ: Σ's
+      eigenvectors are V, and its eigenvalues are S² / (n − 1).
+    - **Whitening, step by step.** (x − μ) · U gives the coordinates along the principal directions.
+      × Λ<sup>−½</sup> then divides each coordinate by its standard deviation, which makes every
+      variance 1.
+    - **The top k columns of U is PCA.** Projecting onto the k largest-variance directions is PCA
+      dimensionality reduction. Whitening is PCA plus the rescale, hence "PCA whitening".
+    - **You need n > D.** With fewer vectors than dimensions, some eigenvalues are 0 and Λ<sup>−½</sup>
+      divides by zero. Keep only the top k, or add a small ε.
+
+    ```python
+    mu = X.mean(axis=0); Xc = X - mu
+    Sigma = Xc.T @ Xc / (len(X) - 1)                 # D × D covariance
+    lam, U = np.linalg.eigh(Sigma)                   # ascending eigenvalues
+    lam, U = lam[::-1][:k], U[:, ::-1][:, :k]        # top k directions: the PCA step
+    X_white = Xc @ U / np.sqrt(lam)                  # unit variance in every kept direction
+    ```
+
+    </details>
+  - **The difference:** centering moves the cloud to the origin; whitening also makes it round
+    (ellipsoid → ball).
+  - **Both are fitted on your corpus** (μ, U, Λ), so they go stale when it shifts. Re-normalize
+    afterwards if your index assumes unit vectors.
+- **In production: fit once, apply the same transform everywhere.** Measure it on your own queries
+  before adopting it.
+  - **At ingestion:** compute μ (plus U, Λ for whitening) from the corpus embeddings, or a sample of a
+    few thousand (whitening needs n > D). Store it versioned with the model id, D and prefix, transform
+    every chunk, d̃ = normalize(d − μ), and keep the raw embeddings so a refit after the corpus grows
+    needs no re-embedding.
+  - **At query time:** apply the same stored transform, q̃ = normalize(q − μ). Never recompute μ from
+    queries.
 
 ### Worked: setting a similarity threshold from two distributions
 
-A cosine cutoff is a claim about where two groups of pairs separate. You find it by scoring both
-groups with the model you will ship. Here it is for the opening scene's dedup cutoff.
+A cosine cutoff is a claim that two groups of pairs separate. You check it by scoring both groups
+with the model you will ship. Here it is for the opening scene's dedup cutoff, **measured** with
+[`lab/run_threshold_distributions.py`](lab/run_threshold_distributions.py) on three real models: the
+scene's old model, `text-embedding-ada-002` itself; `bge-base-en-v1.5` standing in for the unnamed
+leader [[HF-BGE15]](#src-hf-bge15); and `text-embedding-3-large`, LogiTrack's eventual choice.
 
-**1 · Build labelled pairs from your own chunks.** From the lab's 200 LogiTrack chunks:
-- **Duplicates (should be dropped), 120 pairs:** the same boilerplate clause in two carriers'
-  agreements; the same page re-uploaded under a new filename.
-  - Leave out overlap pairs. M3 catches those by character offsets, with no threshold
-    ([→ M3](../03-parsing-and-chunking/README.md#overlap-what-it-buys-and-what-it-costs)).
-- **Hard negatives (must be kept), 120 pairs:** the same clause with one figure changed, e.g. a DG
-  surcharge of 3.5% in one agreement and 4.0% in its revision. The text is almost identical, and the
-  one difference is the only part that matters.
+**1 · Build labelled pairs from your own chunks.** From the lab's 200 LogiTrack clause chunks:
+- **Duplicates (should be dropped), 120 pairs:** the same clause re-uploaded under a new filename
+  and page number, the same boilerplate under another carrier's agreement header, or the same
+  clause re-wrapped with normalized punctuation. Never byte-identical copies, which trivially score 1.
+- **Hard negatives (must be kept), 120 pairs:** the same clause with exactly one figure changed, e.g.
+  insured value of 110% vs 108% of CIF, or 10 vs 7 working days. Every other byte is identical, and
+  the one difference is the only part that matters.
+- **Overlap pairs (left out of all sets):** neighbouring chunks that share text only because the
+  chunker overlaps them. They're neither duplicates (both chunks stay in the index) nor hard negatives
+  (the shared text is identical, not a near-copy with one change). The cutoff isn't for them: M3
+  already knows them from character offsets, with no threshold
+  ([→ M3](../03-parsing-and-chunking/README.md#overlap-what-it-buys-and-what-it-costs)). Mixed into
+  either set, their high scores would skew that set's distribution.
 - **Random pairs, 1,000:** any two chunks.
 
-**2 · Score every pair with each model and compare the distributions.**
+**2 · Score every pair with each model and compare the distributions** (seed 0; seeds 1 and 2 move
+every score by less than 0.02):
 
-| Pair set | Old model (`ada-002`) | New model (the MTEB leader) |
-|---|---|---|
-| Random pairs, median | 0.74 | 0.21 |
-| Hard negatives, 99th percentile | 0.978 | 0.925 |
-| Duplicates, 5th percentile | 0.985 | 0.93 |
-| Duplicates, median | 0.993 | 0.96 |
-| **Cutoff** (lowest value with ≤ 1% of hard negatives above it) | **0.98** | **0.93** |
-| Duplicates caught at 0.98 | 96% | **7%** |
-| Duplicates caught at the model's own cutoff | 96% | 95% |
+| Pair set | Old model (`ada-002`) | Leader stand-in (`bge-base-en-v1.5`) | `text-embedding-3-large` |
+|---|---|---|---|
+| Random pairs, median | 0.871 | 0.658 | 0.601 |
+| Hard negatives, median | 0.9997 | 0.9998 | 0.9979 |
+| Hard negatives, 99th percentile | 0.99999 | 0.99999 | 0.99991 |
+| Duplicates, 5th percentile | 0.954 | 0.931 | 0.880 |
+| Duplicates, median | 0.9975 | 0.9975 | 0.9889 |
+| Hard negatives scoring above the duplicates' median | 99% | 98% | 94% |
 
-- The old model's random pairs sit at 0.74: [the cone](#the-cone-effect-raw-embeddings-are-not-isotropic) in one number.
-  The figure is synthetic, but it sits in the 0.7–1 range forum users report for `ada-002`
-  [[OAIF-ADASCALE23]](#src-oaif-adascale23).
-- Carrying 0.98 over to the new model catches 7% of duplicates. That's the week of silent ingest
-  from the opening scene.
+- **ada-002's random pairs sit at 0.871:** [the cone](#the-cone-effect-raw-embeddings-are-not-isotropic)
+  in one number, inside the 0.7–1 range forum users report [[OAIF-ADASCALE23]](#src-oaif-adascale23).
+  The two newer models spread random pairs much lower.
+- **One changed figure costs almost nothing:** a median of 0.0003 on ada-002, 0.0002 on BGE and 0.002
+  on 3-large. The hard negatives sit at or above most duplicates, because one digit is a tiny share of
+  a 70-word chunk's vector.
 
-**3 · Read the cutoff off the hard negatives, not the random pairs.**
-- Against random pairs, almost any high cutoff looks safe. The cutoff that matters is the one that
-  still keeps the revised clause.
-- **Set it by the costlier error.** Dropping a hard negative deletes the current DG surcharge from
-  the index, which causes a wrong answer. Keeping a duplicate wastes a top-k slot. So cap false drops
-  (here ≤ 1% of hard negatives) and accept the duplicates the cap lets through.
+**3 · Try to read a cutoff off the distributions.** Three rules, each with the duplicates it catches
+and the hard negatives it wrongly drops:
 
-**4 · The gap is the real result.**
-- The gap between hard negatives and duplicates is 0.978 → 0.985 on the old model and 0.925 → 0.93 on
-  the new one. Both are under 0.01.
-- A gap that narrow breaks with small changes: a prefix, normalization, a parser update.
-- **If the two distributions overlap, no cosine cutoff is safe.** Add a second check instead, e.g.
-  drop a chunk only if its numbers and identifiers also match exactly.
+| Cutoff rule | `ada-002`: cutoff · dups caught · hard negs dropped | `bge-base-en-v1.5`: same | `text-embedding-3-large`: same |
+|---|---|---|---|
+| **Cap false drops** at ≤ 1% of hard negatives | 0.99999 · 0% · 0.8% | 0.99999 · 0% · 0.8% | 0.99992 · 0% · 0.8% |
+| **Best trade-off** (maximize caught − dropped) | 0.99999 · 0% · 0% | 0.99999 · 0% · 0% | 0.99994 · 0% · 0% |
+| **By eye:** just under the duplicates (their 5th percentile), ignoring hard negatives | 0.954 · 95% · 100% | 0.931 · 95% · 100% | 0.880 · 95% · 100% |
+
+- **Capping false drops is the right rule**, set by the costlier error: dropping a hard negative
+  deletes the current DG surcharge from the index and causes a wrong answer, while keeping a duplicate
+  only wastes a top-k slot. Here the safe cutoff catches no duplicates at all.
+- **The by-eye rule is what the opening scene's team did.** It catches 95% of duplicates and drops
+  **every** revised clause.
+- **Carried over unchanged**, ada-002's by-eye 0.954 catches 86% of BGE's duplicates and 65% of
+  3-large's (seeds 0–2: 86–93% and 65–72%): the opening scene's slip. It still drops every hard
+  negative.
+
+**4 · The result: here, no cosine cutoff is safe.**
+- The two distributions overlap on both models, so dedup needs a **second, exact check**: cosine
+  shortlists near-identical chunks, and a chunk is dropped only if its numbers and identifiers also
+  match exactly.
+- Cosine reacts more to the header than to the figure: the other-carrier duplicates scored lowest of
+  all duplicates (medians 0.965 on ada-002, 0.964 on BGE, 0.915 on 3-large), well below the
+  one-figure hard negatives.
+- The one partial exception was the open model `e5-base-v2` [[HF-E5]](#src-hf-e5): only 24% of its
+  hard negatives scored above its duplicates' median. Even so, its best cutoff catches 54% of duplicates and drops 26% of
+  hard negatives (lab output).
+- **Where a gap does exist**, e.g. when hard negatives differ in more than one figure, read the cutoff
+  off the hard negatives' upper tail, not the random pairs. Against random pairs, almost any high
+  cutoff looks safe.
+- **Read it with care:** 200 chunks from 16 clause templates, which pushes random-pair scores up;
+  an open stand-in for the unnamed leader; one corpus. Rerun it on your own chunks.
 
 **5 · Version the cutoff with the model.**
 - Store the cutoff next to the model id, D, normalization and prefix (M4-1, M4-3). Any change to
@@ -394,13 +736,21 @@ groups with the model you will ship. Here it is for the opening scene's dedup cu
 ## Dimensionality, Matryoshka truncation, and the storage bill
 
 Vector width is the single largest multiplier on your storage line item, and unlike chunk count it
-is chosen for you by the model vendor — unless you use Matryoshka Representation Learning, which
+is chosen for you by the model vendor — unless you use Matryoshka Representation Learning(MRL), which
 trains *"coarse-to-fine representations"* so that a single embedding can be truncated to a shorter
 prefix at query time, reporting *"up to 14x smaller embedding size"* for classification at equal
 accuracy and *"up to 14x real-world speed-ups for large-scale retrieval"* on image benchmarks
-[[MRL22]](#src-mrl22). The property that makes this safe is that the truncated vector is still a valid embedding,
+[[MRL22]](#src-mrl22). \
+The property that makes this safe is that the truncated vector is still a valid embedding,
 because the training objective explicitly supervised the prefixes: MRL representations are *"at
 least as accurate and rich as independently trained low-dimensional representations"* [[MRL22]](#src-mrl22).
+
+<details>
+<summary><b>Why "Matryoshka"?</b></summary>
+
+Like Russian nesting dolls, each shorter prefix (the first 32 numbers, then 64, …) is a complete, usable embedding sitting inside the longer one.
+
+</details>
 
 LlamaIndex exposes this as a pass-through: extra keyword arguments to `HuggingFaceEmbedding` are
 forwarded to the underlying `SentenceTransformer`, and the docs name `truncate_dim` explicitly
@@ -803,11 +1153,12 @@ Five findings decide the architecture:
    to query expansion (→ M10) and fine-tuning (→ M15), not to another model swap.
 
 **LogiTrack's decision after M4:** `text-embedding-3-large` with a dimension sweep, L2-normalized,
-cosine scoring, no instruction prefixes; the near-duplicate cutoff and relevance floors to be
-**re-measured after the migration, not carried over**, using the
-[two-distribution procedure](#worked-setting-a-similarity-threshold-from-two-distributions). The M4
-lab — the same 200 chunks embedded by three models, similarity distributions plotted, near-duplicate
-threshold read off the distributions — runs that procedure with real numbers.
+cosine scoring, no instruction prefixes; relevance floors **re-measured after the migration, not
+carried over**, using the
+[two-distribution procedure](#worked-setting-a-similarity-threshold-from-two-distributions); and
+dedup as a cosine shortlist plus an exact match on numbers and identifiers, because the measured
+duplicate and hard-negative distributions overlap. The M4 lab's threshold script runs that
+procedure on real models.
 
 ---
 
@@ -836,7 +1187,7 @@ decision with an arithmetic backing and a revert condition.
 5. **Measure, do not rank.** Shortlist from BEIR/MTEB [[BEIR21]](#src-beir21)[[MTEB22]](#src-mteb22), then measure recall@k on your
    own labelled queries. If any candidate is MRL-trained, sweep truncated dimensions [[MRL22]](#src-mrl22) and
    report the recall/storage curve. Run the lab (three models, 200 chunks, similarity distributions)
-   and state the empirically-read near-duplicate threshold for the winner.
+   and state the empirically-read near-duplicate threshold for the winner, or show that none is safe.
 6. **Write the revert condition.** Name the metric, the k, and the delta that would send you back to
    the previous model — and the cost you would be re-paying to get there (the full re-embed, plus
    every threshold recalibration).
@@ -913,6 +1264,8 @@ that no benchmark ranks.
 - <a id="src-limit25"></a>*On the Theoretical Limitations of Embedding-Based Retrieval* — Orion Weller, Michael Boratko, Iftekhar Naim, Jinhyuk Lee · arXiv:2508.21038 (ICLR 2026) · [arxiv.org/abs/2508.21038](https://arxiv.org/abs/2508.21038) — `[LIMIT25]` · owns the dimension-bounded expressivity limit of single-vector retrieval.
 - <a id="src-onep26"></a>*One prompt is not enough: Instruction Sensitivity Undermines Embedding Model Evaluation* — Yevhen Kostiuk, Kenneth Enevoldsen · arXiv:2605.22544 (2026) · [arxiv.org/abs/2605.22544](https://arxiv.org/abs/2605.22544) — `[ONEP26]` · owns the instruction-sensitivity result and the non-robustness of leaderboard ranking to prompt selection.
 - <a id="src-msaoai"></a>[Azure OpenAI models — embeddings](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/concepts/models) — `[MSAOAI]` · owns the embedding model dimension/token-limit table, the `dimensions` parameter, and the "you need to generate new embeddings" migration statement.
+- <a id="src-hf-e5"></a>[intfloat/e5-base-v2 model card](https://huggingface.co/intfloat/e5-base-v2) — `[HF-E5]` · owns the `"query: "` prefix for symmetric similarity and the FAQ's *"cosine similarity scores distribute around 0.7 to 1.0"* from *"a low temperature 0.01 for InfoNCE contrastive loss"*, as read by the M4 lab on 2026-11-14.
+- <a id="src-hf-bge15"></a>[BAAI/bge-base-en-v1.5 model card](https://huggingface.co/BAAI/bge-base-en-v1.5) — `[HF-BGE15]` · owns *"no instruction"* for passages, `[CLS]` pooling, and v1.5's release *"to alleviate the issue of the similarity distribution"*, as read by the M4 lab on 2026-11-14.
 - <a id="src-hf-bges"></a>[BAAI/bge-small-en-v1.5 `config.json`](https://huggingface.co/BAAI/bge-small-en-v1.5/raw/main/config.json) — `[HF-BGES]` · owns `hidden_size` 384 and `max_position_embeddings` 512 for the model named in the LlamaIndex docs.
 - <a id="src-hf-denseon"></a>[lightonai/DenseOn `config.json`](https://huggingface.co/lightonai/DenseOn/raw/main/config.json) — `[HF-DENSEON]` · owns `hidden_size` 768 and `max_position_embeddings` 8192.
 - <a id="src-hf-qwen3e"></a>[Qwen/Qwen3-Embedding-0.6B `config.json`](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B/raw/main/config.json) — `[HF-QWEN3E]` · owns `hidden_size` 1024 and `max_position_embeddings` 32768.
@@ -933,12 +1286,11 @@ that no benchmark ranks.
 - <a id="src-li-faiss"></a>[Faiss Vector Store](https://developers.llamaindex.ai/python/examples/vector_stores/faissindexdemo/) — LlamaIndex docs, read 2026-11-14 — `[LI-FAISS]` · library example · owns `faiss_index = faiss.IndexFlatL2(d)` with `d = 1536`.
 - <a id="src-chroma-cfg"></a>[Configure Collections](https://docs.trychroma.com/docs/collections/configure) — Chroma docs, read 2026-11-14 — `[CHROMA-CFG]` · library documentation · owns "The default is `l2` (squared L2 norm), and other possible values are `cosine` (cosine similarity), and `ip` (inner product)", set through `configuration={"hnsw": {"space": ...}}` on single-node Chroma (the page says SPANN settings on Distributed and Chroma Cloud are ignored).
 
-**Unsupported (synthetic, or not verified in this module):** the LogiTrack corpus, its 3,000-document
+**Unsupported (synthetic, or not verified in this module):** in the Gao et al. collapsibles, the 7-step example's vectors are invented for illustration; the parameter saving from tying (30,522 × 768) is computed from the `bert-base-uncased` configuration; that word2vec and GloVe keep separate input and context vectors is general background, not from [GAO19]; the gradient (p<sub>v</sub> − 𝟙[v = y]) · h is standard softmax algebra. the derivation in the cone section's "Why a high average cosine means a cone" collapsible (the mean vector as the axis, ‖m‖ ≈ √c̄, the angle table) is this course's own math, not a claim in [ETH19]; its "clearly positive on raw BERT" line follows ETH19's Figure 1 and wasn't run here. the LogiTrack corpus, its 3,000-document
 and 13.5M-word figures, the 60-query evaluation set, the 187,043- and 40,703-vector counts (which are
 M3's computed figures, restated here), the recall@10 column, the unnamed MTEB-leader row (4,096-d,
-8,192 tokens, 0.72), the near-duplicate story in the opening scene and its 0.98 cutoff, every pair
-count, percentile and catch rate in the threshold worked example, and all tradeoff-ledger entries
-are constructed for teaching and are not empirical findings. Schedule DG-4 and Form LT-17 in the
+8,192 tokens, 0.72), the LogiTrack framing of the opening scene's near-duplicate story, and all
+tradeoff-ledger entries are constructed for teaching and are not empirical findings. Schedule DG-4 and Form LT-17 in the
 opening scene are invented LogiTrack-internal codes, chosen so that no public training data can
 contain them. The Matryoshka and truncation claims for `text-embedding-3`, and the `ada-002`
 anisotropy figures, come from a news report, a vendor blog and OpenAI forum threads
@@ -955,9 +1307,11 @@ page: it truncates (`longest_first`) at the tokenizer's maximum length, capped a
 `max_position_embeddings` [[ST-SRC]](#src-st-src). Whether it warns when it truncates is not checked. The limits
 themselves come from the model configs [[HF-BGES]](#src-hf-bges)[[HF-DENSEON]](#src-hf-denseon)[[HF-QWEN3E]](#src-hf-qwen3e)[[HF-POOL]](#src-hf-pool). **Argued, not
 quoted:** why causal models pool the last token, and that mean pooling over longer chunks dilutes
-each idea's share of the vector, and that hard negatives differing by one figure score within 0.01
-of true duplicates. The threshold worked example shows the procedure with synthetic numbers; real
-numbers come only from running the M4 lab.
+each idea's share of the vector. **Measured:** the threshold worked example's numbers, and the
+opening scene's one-in-four slip and dropped revised clauses, come from
+`lab/run_threshold_distributions.py` (2026-11-14, seeds 0–2) on 200 templated clause chunks, with
+`text-embedding-ada-002` and `text-embedding-3-large` called through OpenAI's API and
+`bge-base-en-v1.5` standing in for the unnamed leader, which was not measured.
 
 **Verification note:** 🟡 *pending* — Step 7 (memory-less logic review) and Step 8 (literature
 survey) not yet run on this module.

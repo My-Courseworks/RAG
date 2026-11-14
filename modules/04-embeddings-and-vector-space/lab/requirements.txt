@@ -1,5 +1,7 @@
-# M4 lab: the Matryoshka recipe. These are the exact versions it was run with on 2026-11-14
-# (Python 3.13.3, macOS, CPU only). Newer versions should work; if one breaks, note it.
+# M4 labs: the Matryoshka recipe and the threshold distributions. These are the exact versions they were
+# run with on 2026-11-14 (Python 3.13.3, macOS, CPU only). Newer versions should work; if one breaks, note it.
 torch==2.15.0
 transformers==5.23.0
-datasets==5.2.0
+datasets==5.2.0                # run_matryoshka_recipe.py only
+numpy==2.5.4                   # run_threshold_distributions.py
+huggingface_hub==2.4.0         # run_threshold_distributions.py (reads the model revision from the cache)
