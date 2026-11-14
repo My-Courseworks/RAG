@@ -283,7 +283,7 @@ single global answer, and the closing decision below is a *mix* of its terminals
 *Recoverable* has a precise meaning in the first question — the extracted text carries markers a
 rule can split on — and the structure-aware path above defines it with examples for and against.
 
-What matters for planning is **which decisions are fixed at ingest**:
+<a id="fixed-at-ingest"></a>What matters for planning is **which decisions are fixed at ingest**:
 
 - **Fixed at ingest — reversing any of these means re-parsing and re-embedding the corpus:**
   - Structure recovery: it decides which units the index contains at all.

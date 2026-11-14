@@ -286,7 +286,7 @@ The reason this matters operationally is that **you do not get to choose indepen
 index or your store**. A vector store's index type is built for one metric; switching metric later
 is a rebuild, not a config toggle. And normalization is a decision you make once, at embed time,
 for every vector in the corpus — which makes it one of the few decisions in the pipeline that is
-retrospectively expensive in exactly the way chunking is (→ M3).
+retrospectively expensive in exactly the way chunking is ([→ M3 · which decisions are fixed at ingest](../03-parsing-and-chunking/README.md#fixed-at-ingest)).
 
 > **Tradeoff (the ledger entry M4-1).** *Decision:* store L2-normalized embeddings and score with
 > cosine, accepting the collapse of Euclidean/dot/cosine into one ranking. *Costs:* magnitudes are
