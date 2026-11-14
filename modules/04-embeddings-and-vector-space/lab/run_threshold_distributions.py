@@ -394,6 +394,10 @@ class ModelUnavailable(Exception):
     """The API says the model doesn't exist or is retired; the run records it and carries on."""
 
 
+class NotCached(Exception):
+    """Some texts aren't in the cache and --allow-api wasn't given, so nothing is sent or billed."""
+
+
 def openai_key():
     """OPENAI_API_KEY if set, else the bare key in ~/.config/openai_key. Never printed or logged."""
     key = os.environ.get("OPENAI_API_KEY") or OPENAI_KEY_FILE.read_text(encoding="utf-8")
@@ -425,10 +429,11 @@ def post_embeddings(model, inputs, key, attempts=5):
             raise RuntimeError(f"OpenAI embeddings call failed: {type(err.reason).__name__}") from None
 
 
-def embed_openai(texts, spec, cache_path, batch_size=512, post=post_embeddings):
+def embed_openai(texts, spec, cache_path, allow_api, batch_size=512, post=post_embeddings):
     """Embed via the OpenAI REST API, reading and writing a (model, sha256(text)) -> vector cache.
 
-    Returns (vectors, label, tokens billed this run). Only uncached texts are sent.
+    Returns (vectors, label, tokens billed this run). Only uncached texts are sent, and only with
+    allow_api; without it the run is cache-only and never reads the key.
     """
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(cache_path)
@@ -438,6 +443,9 @@ def embed_openai(texts, spec, cache_path, batch_size=512, post=post_embeddings):
                              [spec["name"], *shas]).fetchall())
     missing = sorted({sha: t for sha, t in zip(shas, texts) if sha not in cached}.items())
     tokens = 0
+    if missing and not allow_api:
+        db.close()
+        raise NotCached(f"{len(missing)} of {len(texts)} texts not cached; pass --allow-api to send them (paid)")
     if missing:
         key = openai_key()
         for i in range(0, len(missing), batch_size):           # the API allows up to 2048 inputs per call
@@ -456,17 +464,49 @@ def embed_openai(texts, spec, cache_path, batch_size=512, post=post_embeddings):
     return vectors, f"api ({len(texts) - len(missing)} cached, {len(missing)} sent)", tokens
 
 
-def score_pairs(pair_sets, spec, cache_path):
-    """Score every pair; returns (scores by set, model revision or cache label, tokens billed)."""
-    texts = sorted({t for pairs in pair_sets.values() for a, b, _ in pairs for t in (a, b)})
+def embed_texts(texts, spec, cache_path, allow_api):
+    """Unit vectors for texts, in order; returns (vectors, model revision or cache label, tokens billed)."""
     if spec.get("api") == "openai":
-        vectors, revision, tokens = embed_openai(texts, spec, cache_path)
-    else:
-        (vectors, revision), tokens = embed(texts, spec), 0
-    index = {t: i for i, t in enumerate(texts)}
-    scores = {name: np.array([float(vectors[index[a]] @ vectors[index[b]]) for a, b, _ in pairs])
-              for name, pairs in pair_sets.items()}
-    return scores, revision, tokens
+        return embed_openai(texts, spec, cache_path, allow_api)
+    vectors, revision = embed(texts, spec)
+    return vectors, revision, 0
+
+
+def normalize(X):
+    return X / np.linalg.norm(X, axis=1, keepdims=True)
+
+
+def fit_transform(name, fit_vectors, k=None):
+    """Fit a post-embedding transform on the ingestion chunks; return (apply, sanity-check line).
+
+    center: normalize(x - mu). whiten: normalize((x - mu) U_k / sqrt(lambda_k)), with U_k, lambda_k the top-k
+    eigenvectors and eigenvalues of the chunks' covariance X_c^T X_c / (n-1). They come from the SVD of X_c,
+    which gives the same eigenpairs without forming the D x D matrix.
+    """
+    if name == "none":
+        return (lambda X: X), ""
+    n = len(fit_vectors)
+    mu = fit_vectors.mean(axis=0)
+    if name == "center":
+        def apply(X):
+            return normalize(X - mu)
+        G = apply(fit_vectors) @ apply(fit_vectors).T
+        mean_cos = (G.sum() - np.trace(G)) / (n * (n - 1))
+        return apply, f"mean pairwise cosine of fit chunks after centering {mean_cos:+.2e}"
+    Xc = fit_vectors - mu
+    _, sing, vt = np.linalg.svd(Xc, full_matrices=False)
+    W = vt[:k].T / np.sqrt(sing[:k] ** 2 / (n - 1))       # U_k / sqrt(lambda_k), shape D x k
+    Z = Xc @ W
+    max_err = np.abs(Z.T @ Z / (n - 1) - np.eye(k)).max()
+
+    def apply(X):
+        return normalize((X - mu) @ W)
+    return apply, f"max |cov - I| of whitened fit chunks (before renormalizing) {max_err:.2e}"
+
+
+def pair_scores(pair_sets, index, vectors):
+    return {name: np.array([float(vectors[index[a]] @ vectors[index[b]]) for a, b, _ in pairs])
+            for name, pairs in pair_sets.items()}
 
 
 def module_cutoff(hard_negatives, cap=0.01):
@@ -543,8 +583,17 @@ def main():
                         help="ada002, te3small and te3large call the paid OpenAI API")
     parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE,
                         help="OpenAI embedding cache (keep it outside the repo)")
+    parser.add_argument("--allow-api", action="store_true",
+                        help="let OpenAI models send uncached texts (paid); without it they are cache-only")
+    parser.add_argument("--transform", nargs="+", choices=["none", "center", "whiten"], default=["none"],
+                        help="post-embedding transforms, fit on the base chunks, each reported separately")
+    parser.add_argument("--whiten-k", nargs="+", type=int, default=[32, 64, 128],
+                        help="components kept by whiten (each must be < --n-chunks)")
     parser.add_argument("--examples", action="store_true", help="print one pair of each kind")
     args = parser.parse_args()
+    if "whiten" in args.transform and max(args.whiten_k) >= args.n_chunks:
+        parser.error("--whiten-k values must be < --n-chunks (the number of fit vectors)")
+    variants = [(t, k) for t in args.transform for k in (args.whiten_k if t == "whiten" else [None])]
     transformers.logging.set_verbosity_error()   # hides bert-base-uncased's unused-MLM-head report
     transformers.logging.disable_progress_bar()
 
@@ -562,28 +611,54 @@ def main():
             print(f"\n--- {name} ({kind}) ---\n{a}\n~~~\n{b}")
         print()
 
-    scores, tables, billed = {}, {}, {}
+    pair_texts = {t for pairs in pair_sets.values() for a, b, _ in pairs for t in (a, b)}
+    texts = sorted(pair_texts | {c["text"] for c in chunks})
+    index = {t: i for i, t in enumerate(texts)}
+    fit_rows = [index[c["text"]] for c in chunks]          # the ingestion set: base chunks, no pair variants
+    labels = [t if k is None else f"{t}{k}" for t, k in variants]
+    scores, tables, billed = {}, {}, {}                    # scores[(model, transform label)]
     for key in args.models:
         spec = MODELS[key]
         try:
-            scores[key], revision, billed[key] = score_pairs(pair_sets, spec, args.cache)
+            vectors, revision, billed[key] = embed_texts(texts, spec, args.cache, args.allow_api)
         except ModelUnavailable as err:
             print(f"UNAVAILABLE {key:<8} {spec['name']}: {err}; skipped", flush=True)
             continue
-        tables[key] = summary_rows(scores[key])
+        except NotCached as err:
+            print(f"SKIPPED {key:<8} {spec['name']}: {err}", flush=True)
+            continue
         print(f"scored {key:<8} {spec['name']} @ {revision}", flush=True)
-    models = list(scores)
+        for (name, k), label in zip(variants, labels):
+            apply, check = fit_transform(name, vectors[fit_rows], k)
+            scores[key, label] = pair_scores(pair_sets, index, apply(vectors))
+            tables[key, label] = summary_rows(scores[key, label])
+            if check:
+                print(f"  {label:<9} {check}")
+    models = [k for k in args.models if (k, labels[0]) in scores]
     if not models:
         return
 
-    print(f"\n{'':<40}" + "".join(f"{k:>10}" for k in models))
-    for i, (label, _, fmt_spec) in enumerate(tables[models[0]]):
-        print(f"{label:<40}" + "".join(f"{format(tables[k][i][1], fmt_spec):>10}" for k in models))
+    for label in labels:
+        print(f"\n[transform: {label}]" + f"\n{'':<40}" + "".join(f"{k:>10}" for k in models))
+        for i, (row, _, fmt_spec) in enumerate(tables[models[0], label]):
+            print(f"{row:<40}" + "".join(f"{format(tables[k, label][i][1], fmt_spec):>10}" for k in models))
 
-    print_medians_by_kind("Duplicates", pair_sets["duplicates"], scores, models, "duplicates")
-    print_medians_by_kind("Hard negatives", pair_sets["hard_negatives"], scores, models, "hard_negatives")
-    print_carry_over("CUTOFF", lambda s: module_cutoff(s["hard_negatives"]), scores, models)
-    print_carry_over("naive cutoff", lambda s: naive_cutoff(s["duplicates"]), scores, models)
+    print("\nSummary: gap = dup p5 - hardneg p99; cutoff = lowest value with <= 1% of hard negatives above it")
+    print(f"  {'model':<9}{'transform':<11}{'gap':>10}{'clean gap':>11}{'hn > dup med':>14}{'dups caught':>13}")
+    for key in models:
+        for label in labels:
+            rows = {row: v for row, v, _ in tables[key, label][:12]}
+            dup, hn = scores[key, label]["duplicates"], scores[key, label]["hard_negatives"]
+            print(f"  {key:<9}{label:<11}{rows['gap (dup p5 - hardneg p99)']:>+10.4f}"
+                  f"{rows['clean gap (dup min > hardneg max)?']:>11}{(hn > np.median(dup)).mean():>14.1%}"
+                  f"{(dup > module_cutoff(hn)).mean():>13.1%}")
+
+    base = {k: scores[k, labels[0]] for k in models}       # by-kind and carry-over: first transform only
+    print(f"\n(by-kind medians and carry-over below use transform: {labels[0]})")
+    print_medians_by_kind("Duplicates", pair_sets["duplicates"], base, models, "duplicates")
+    print_medians_by_kind("Hard negatives", pair_sets["hard_negatives"], base, models, "hard_negatives")
+    print_carry_over("CUTOFF", lambda s: module_cutoff(s["hard_negatives"]), base, models)
+    print_carry_over("naive cutoff", lambda s: naive_cutoff(s["duplicates"]), base, models)
 
     paid = [k for k in models if "usd_per_1m" in MODELS[k]]
     if paid:
@@ -593,6 +668,7 @@ def main():
             print(f"  {k:<8} {billed[k]:>8,} tokens  ${cost:.5f}")
         total = sum(billed[k] * MODELS[k]["usd_per_1m"] / 1e6 for k in paid)
         print(f"  total    {sum(billed[k] for k in paid):>8,} tokens  ${total:.5f}")
+
 
 if __name__ == "__main__":
     main()

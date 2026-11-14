@@ -10,7 +10,10 @@ Runs the recipe in [M4 · Worked: training a Matryoshka embedder yourself](../RE
   and executes them as written, so the module's code and this lab can't drift apart. It adds only the data
   and the Step 8 comparison.
 - **What it prints:** recall@1 at every width (32 → 384) for the untrained base model, the
-  Matryoshka-trained model, and a control trained on the full width only.
+  Matryoshka-trained model, and a control trained on the full width only. Then a second table that adds a
+  PCA baseline for each of the three models (below).
+- **Seeded:** `--seed` picks the data sample and also fixes the training batch order and dropout. Both
+  trained models start from the same order, so a seed always gives the same output.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -24,6 +27,9 @@ The first run downloads `all-MiniLM-L6-v2` (~90 MB) and, for `--data nq`, the Na
 
 ### Recorded result (2026-11-14, seed 0, the versions in `requirements.txt`)
 
+The first recorded run, which the module's Step 8 table shows. It came from the script before seeding was
+added, so the training batch order was random:
+
 ```
 base model, untrained        {32: 0.8, 64: 0.916, 128: 0.958, 256: 0.964, 384: 0.974}
 Matryoshka (DIMS)            {32: 0.892, 64: 0.936, 128: 0.952, 256: 0.966, 384: 0.976}
@@ -31,6 +37,80 @@ control (dims=[384])         {32: 0.808, 64: 0.926, 128: 0.958, 256: 0.97, 384: 
 ```
 
 What it shows and its caveats are in the module, under the Step 8 results table.
+
+The current, seeded script on the same seed 0 (the same output on a second run). The base model has no
+training, so its line is identical. The two trained models move by at most 0.008 at any width, because the
+batch order is now fixed rather than random:
+
+```
+base model, untrained        {32: 0.8, 64: 0.916, 128: 0.958, 256: 0.964, 384: 0.974}
+Matryoshka (DIMS)            {32: 0.888, 64: 0.934, 128: 0.956, 256: 0.966, 384: 0.97}
+control (dims=[384])         {32: 0.816, 64: 0.93, 128: 0.966, 256: 0.972, 384: 0.98}
+```
+
+### PCA baseline: is Matryoshka better than the best post-hoc compression?
+
+Comparing Matryoshka prefixes with the first $k$ coordinates of an ordinary model is a weak
+possible baseline: an ordinary model puts no order on its coordinates. The strongest cheap baseline is PCA,
+which picks the $k$ directions that carry the most variance. So the script also scores **PCA-$k$** for
+each of the three models:
+
+- **Fit the way production would.** Embed the indexed corpus (the 3,000 training passages, not the test
+  set and not the queries) with that model at full width, as unit vectors. $\mu$ is their mean. $U_k$ is
+  the top $k$ principal directions, from the SVD of the centred matrix. Each model gets its own fit, on its
+  own embeddings.
+- **Apply it frozen.** Every test query and test passage becomes
+  $\text{normalize}\big((x - \mu)\,U_k\big)$. Recall@1 is then scored exactly as the recipe scores it.
+- **Centred** is the full-width score after subtracting $\mu$ only. At $k = 384$, PCA is centring plus a
+  rotation, and a rotation changes no cosine. So PCA-384 must equal centred, and it does, on every model and
+  seed: that is the sanity check.
+- PCA directions are ordered too, so a PCA-rotated index can be cut at any $k$, like a Matryoshka
+  vector. What PCA costs: you fit and store $\mu$ and $U$ (here 384 × 384), you multiply every query by
+  them, and if the corpus drifts you refit and re-project the whole index.
+
+**Seed 0** (recall@1 on the 500 held-out pairs; *prefix* = first $k$ coordinates, re-normalized):
+
+```
+recall@1 at width k: prefix = first k coordinates (embed_at); PCA = fitted on the training passages, applied frozen
+model       method        32      64     128     256     384   centred
+base        prefix     0.800   0.916   0.958   0.964   0.974
+base        PCA        0.870   0.950   0.976   0.976   0.976     0.976
+Matryoshka  prefix     0.888   0.934   0.956   0.966   0.970
+Matryoshka  PCA        0.904   0.946   0.956   0.972   0.970     0.970
+control     prefix     0.816   0.930   0.966   0.972   0.980
+control     PCA        0.880   0.946   0.980   0.980   0.982     0.982
+(centred = full width, corpus mean subtracted, no projection; it must equal PCA at the last width)
+```
+
+**All three seeds** (`--seed 1` and `--seed 2` draw other pairs and another batch order). The small widths, where the
+question is decided:
+
+| Seed | k | Matryoshka prefix | Base PCA | Control PCA | Matryoshka PCA |
+|---|---|---|---|---|---|
+| 0 | 32 | **0.888** | 0.870 | 0.880 | 0.904 |
+| 1 | 32 | 0.848 | **0.876** | 0.834 | 0.870 |
+| 2 | 32 | 0.904 | **0.906** | 0.870 | 0.910 |
+| 0 | 64 | 0.934 | **0.950** | 0.946 | 0.946 |
+| 1 | 64 | 0.924 | **0.940** | 0.934 | 0.934 |
+| 2 | 64 | 0.952 | **0.966** | 0.962 | 0.964 |
+
+Bold marks the best of Matryoshka prefix, base PCA and control PCA. Matryoshka PCA is shown for reference: it needs both the
+fine-tuning and a fit.
+
+- **On this data, Matryoshka fine-tuning does not beat PCA on the untrained model.** At $k = 32$ the
+  two tie: the Matryoshka prefix wins on seed 0 (+0.018), loses on seed 1 (−0.028), and is level on seed 2
+  (−0.002), with means of 0.880 and 0.884. At $k = 64$ base PCA wins on all three seeds, by 0.014–0.016.
+  The base model was already trained on Natural Questions, so the fine-tuning has little to add here and
+  the comparison favours PCA. On data the base model hasn't seen, fine-tuning has more to teach, and the
+  answer may differ.
+- **Against the control, Matryoshka training wins only at the smallest width.** At $k = 32$ the
+  Matryoshka prefix beats control PCA on every seed (+0.008, +0.014, +0.034). At $k = 64$ control PCA wins
+  on every seed (+0.012, +0.010, +0.010). So if you fine-tune anyway, the ordinary loss plus PCA is as good
+  as Matryoshka from 64 dimensions up.
+- **The naive prefix is a weak baseline.** On seed 0, PCA lifts every model at $k = 32$: base +0.070, control
+  +0.064, Matryoshka +0.016. Matryoshka gains least because its first coordinates already carry most of
+  the information. With 500 test queries, one query is 0.002 and the standard error of a single score
+  near 0.88 is about 0.015. Read gaps under ~0.02 on a single seed as noise.
 
 ### `--data synthetic` result
 
@@ -75,6 +155,8 @@ Measures the table in [M4 · Worked: setting a similarity threshold from two dis
     - Embeddings are cached in `~/.cache/rag-course/m4-openai-embeddings.sqlite` (`--cache`), keyed by model
       and text hash, so reruns don't re-bill. The run prints the tokens billed and the cost.
     - If a model is retired (HTTP 404 or `model_not_found`), the run prints `UNAVAILABLE` and carries on.
+    - **Nothing is sent without `--allow-api`.** Without that flag the OpenAI models are cache-only: a model
+      with uncached texts prints `SKIPPED … pass --allow-api`, and the key is never read.
 - **What it prints, per model:**
   - the percentiles from the module's table;
   - the gap (dup p5 − hard-negative p99), and the share of hard negatives above the duplicates' median;
@@ -89,7 +171,8 @@ Measures the table in [M4 · Worked: setting a similarity threshold from two dis
 python run_threshold_distributions.py                       # seed 0, all three models, ~15 s after downloads
 python run_threshold_distributions.py --seed 1              # another corpus and pair draw
 python run_threshold_distributions.py --models e5 bge --examples   # also print one pair of each kind
-python run_threshold_distributions.py --models e5 bge ada002 te3small te3large   # paid: needs an OpenAI key
+python run_threshold_distributions.py --models e5 bge ada002 te3small te3large --allow-api   # paid: needs an OpenAI key
+python run_threshold_distributions.py --models e5 bge --transform none center whiten   # see "Centering and whitening"
 ```
 
 The first run downloads the three open models from the Hugging Face Hub (about 440 MB each). Without the
@@ -289,3 +372,109 @@ OpenAI tokens billed this run (cached texts cost nothing):
 - ada-002's by-eye cutoff (its duplicates' 5th percentile) carried over to 3-large catches 65.0 / 70.0 / 71.7%
   of duplicates. Carried over to BGE it catches 85.8 / 89.2 / 93.3%. It drops 100% of hard negatives in both
   cases.
+
+### Centering and whitening: do they separate duplicates from hard negatives?
+
+`--transform none center whiten` applies a post-embedding transform and reports each one separately
+(`whiten` once per `--whiten-k`, default 32, 64 and 128).
+
+- **Fit on the ingestion set only:** each model's embeddings of the 200 base chunks, before any pair
+  variant exists. μ is their mean, and Σ = X_cᵀX_c/(n−1) is their covariance. U_k and λ_k are Σ's top-k
+  eigenvectors and eigenvalues, taken from the SVD of X_c (same eigenpairs, no D×D matrix).
+- **Apply the same frozen transform to every text in every pair,** then L2-renormalize:
+  - `center`: normalize(x − μ);
+  - `whiten`: normalize((x − μ) U_k / √λ_k). k must be < the number of fit vectors.
+- **Sanity checks it prints:**
+  - after centering, the mean pairwise cosine of the fit chunks (≈ 0; with n unit vectors that sum to zero it
+    would be exactly −1/(n−1) ≈ −0.005);
+  - after whitening, before renormalizing, the max |cov − I| of the fit chunks.
+- Every row of the main table is printed per model × transform, followed by a summary table. The by-kind
+  medians and the carry-over use the first transform listed. With the default `--transform none`, the
+  output gains a `[transform: none]` header and the summary; the numbers in the results above are unchanged.
+
+### Recorded result (2026-11-14, seed 0, transforms, e5 / BGE / ada-002 / 3-small / 3-large)
+
+`python run_threshold_distributions.py --models e5 bge ada002 te3small te3large --transform none center whiten`.
+The OpenAI vectors came from the cache filled by the run above, so this run sent 0 texts and billed $0.
+Excerpts of the raw output (the per-transform tables are left out):
+
+```
+scored e5       intfloat/e5-base-v2 @ f52bf8ec8c
+  center    mean pairwise cosine of fit chunks after centering -4.44e-03
+  whiten32  max |cov - I| of whitened fit chunks (before renormalizing) 3.66e-15
+  whiten64  max |cov - I| of whitened fit chunks (before renormalizing) 6.22e-15
+  whiten128 max |cov - I| of whitened fit chunks (before renormalizing) 9.15e-15
+scored bge      BAAI/bge-base-en-v1.5 @ a5beb1e3e6
+  center    mean pairwise cosine of fit chunks after centering -4.47e-03
+  whiten32  max |cov - I| of whitened fit chunks (before renormalizing) 7.49e-15
+  whiten64  max |cov - I| of whitened fit chunks (before renormalizing) 7.49e-15
+  whiten128 max |cov - I| of whitened fit chunks (before renormalizing) 7.49e-15
+scored ada002   text-embedding-ada-002 @ api (440 cached, 0 sent)
+  center    mean pairwise cosine of fit chunks after centering -3.06e-03
+  whiten32  max |cov - I| of whitened fit chunks (before renormalizing) 4.70e-15
+  whiten64  max |cov - I| of whitened fit chunks (before renormalizing) 4.70e-15
+  whiten128 max |cov - I| of whitened fit chunks (before renormalizing) 4.70e-15
+scored te3small text-embedding-3-small @ api (440 cached, 0 sent)
+  center    mean pairwise cosine of fit chunks after centering -3.28e-03
+  whiten32  max |cov - I| of whitened fit chunks (before renormalizing) 5.11e-15
+  whiten64  max |cov - I| of whitened fit chunks (before renormalizing) 5.11e-15
+  whiten128 max |cov - I| of whitened fit chunks (before renormalizing) 5.11e-15
+scored te3large text-embedding-3-large @ api (440 cached, 0 sent)
+  center    mean pairwise cosine of fit chunks after centering -3.77e-03
+  whiten32  max |cov - I| of whitened fit chunks (before renormalizing) 9.21e-15
+  whiten64  max |cov - I| of whitened fit chunks (before renormalizing) 9.21e-15
+  whiten128 max |cov - I| of whitened fit chunks (before renormalizing) 9.21e-15
+
+Summary: gap = dup p5 - hardneg p99; cutoff = lowest value with <= 1% of hard negatives above it
+  model    transform         gap  clean gap  hn > dup med  dups caught
+  e5       none          -0.0280         no         24.2%         0.0%
+  e5       center        -0.2246         no         25.0%         0.0%
+  e5       whiten32      -0.4817         no         18.3%         0.8%
+  e5       whiten64      -0.5060         no         17.5%         0.8%
+  e5       whiten128     -0.5780         no         41.7%         0.0%
+  bge      none          -0.0691         no         98.3%         0.0%
+  bge      center        -0.2396         no         97.5%         0.0%
+  bge      whiten32      -0.5849         no        100.0%         0.0%
+  bge      whiten64      -0.7000         no         89.2%         0.0%
+  bge      whiten128     -0.6933         no         90.8%         0.0%
+  ada002   none          -0.0465         no         99.2%         0.0%
+  ada002   center        -0.4237         no         99.2%         0.0%
+  ada002   whiten32      -0.6255         no         98.3%         0.0%
+  ada002   whiten64      -0.6656         no         67.5%         0.0%
+  ada002   whiten128     -0.6912         no         86.7%         0.0%
+  te3small none          -0.1582         no        100.0%         0.0%
+  te3small center        -0.4393         no        100.0%         0.0%
+  te3small whiten32      -0.6715         no        100.0%         0.0%
+  te3small whiten64      -0.6598         no         90.0%         0.0%
+  te3small whiten128     -0.6926         no         95.8%         0.0%
+  te3large none          -0.1197         no         94.2%         0.0%
+  te3large center        -0.2954         no         94.2%         0.0%
+  te3large whiten32      -0.6116         no         90.8%         0.0%
+  te3large whiten64      -0.6559         no         80.0%         0.0%
+  te3large whiten128     -0.6326         no         85.0%         0.0%
+
+OpenAI tokens billed this run (cached texts cost nothing):
+  ada002          0 tokens  $0.00000
+  te3small        0 tokens  $0.00000
+  te3large        0 tokens  $0.00000
+  total           0 tokens  $0.00000
+```
+
+**Seeds 1 and 2** (cache-only, $0) give the same picture:
+- No model × transform has a clean gap on any seed, and every gap is negative (−0.026 to −0.745).
+- At the ≤ 1%-false-drop cutoff, no combination catches more than 2.5% of duplicates on any seed (the
+  2.5% cases are e5 `whiten32` and BGE `whiten128` on seed 1). The OpenAI models catch 0% under every
+  transform on every seed.
+
+**What it shows:**
+- **Neither transform separates the sets.** Centering and whitening move random pairs to about 0 and
+  spread the duplicates out: the duplicates' 5th percentile falls to 0.26–0.82 across seeds. The hard
+  negatives' 99th percentile stays at 0.9989 or above, so every gap gets *wider in the wrong direction*.
+- **k changes the shape, not the verdict.** k = 64 lowers the share of hard negatives above the duplicates'
+  median the most: ada-002 99% → 67.5–77%, 3-large 92–94% → 55–80% across seeds. But the top 1% of hard
+  negatives still sits above nearly every duplicate, so the cutoff catches 0–2.5%.
+- **Why:** both transforms are fit on the chunks, so they re-weight the directions in which *chunks* differ
+  (topic, template, carrier). A one-figure edit barely moves the vector in any direction, so no linear
+  re-weighting makes it less similar than a duplicate with a new header. The fix is still the exact check on
+  numbers and identifiers from the module's step 4.
+

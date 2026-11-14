@@ -96,6 +96,8 @@ vector per text.
   |---|---|---|---|---|---|
   | `text-embedding-3-small` (OpenAI) | Hosted, so not applicable | 8,192 tokens (the API's max input) | 1,536 (can be shortened) | Not disclosed | [[OAI-EMB]](#src-oai-emb) |
   | `text-embedding-3-large` (OpenAI) | Hosted, so not applicable | 8,192 tokens (the API's max input) | 3,072 (can be shortened) | Not disclosed | [[OAI-EMB]](#src-oai-emb) |
+  | `gemini-embedding-001` (Google) | Hosted, so not applicable | 2,048 tokens (the API's input token limit) | 3,072 (can be shortened, 128–3,072) | [Mean](#pool-mean), per Google's tech report | [[GEMINI-EMB]](#src-gemini-emb)[[GEM25]](#src-gem25)[[VERTEX-EMB]](#src-vertex-emb) |
+  | `gemini-embedding-2` (Google) | Hosted, so not applicable | 8,192 tokens, shared across text, image, audio, video and PDF | 3,072 (can be shortened, 128–3,072) | Not disclosed | [[GEMINI-EMB]](#src-gemini-emb) |
   | `all-MiniLM-L6-v2` | **256** | 512 | 384 | [Mean](#pool-mean) | [[HF-POOL]](#src-hf-pool) |
   | `bge-base-en-v1.5` | 512 | 512 | 768 | [`[CLS]`](#pool-cls) | [[HF-POOL]](#src-hf-pool) |
   | `e5-base-v2` | 512 | 512 | 768 | [Mean](#pool-mean) | [[HF-POOL]](#src-hf-pool) |
@@ -110,23 +112,43 @@ vector per text.
     take.
   - **When they differ, the smaller one wins silently.** A 300-token chunk embedded with
     `all-MiniLM-L6-v2` loses its last 44 tokens, even though the architecture could take 512.
+  - **Both Gemini rows are live models, but one is on its way out.**
+    - Google lists `gemini-embedding-2` (released April 22, 2026) as the recommended replacement
+      for `gemini-embedding-001`, which shuts down on May 14, 2028 [[GEMINI-DEPR]](#src-gemini-depr).
+    - The two spaces are *"incompatible"*: upgrading means you *"must re-embed all of your existing
+      data"* [[GEMINI-EMB]](#src-gemini-emb).
 
 - **Past the limit, text is cut off, not rejected.**
   - Sentence Transformers 6.3.0 tokenizes text with `truncation="longest_first"`, and caps the
     tokenizer's maximum length at the model's `max_position_embeddings` [[ST-SRC]](#src-st-src).
   - So an over-long chunk is embedded **from its beginning only**, and the rest never reaches the
     vector.
+  - **Hosted Gemini models truncate by default too.**
+    - Google Cloud's text embeddings API has an `autoTruncate` parameter: *"When set to true, input
+      text will be truncated. When set to false, an error is returned … Defaults to true"*
+      [[VERTEX-EMB]](#src-vertex-emb). The page now sits under "Gemini Enterprise Agent Platform",
+      and the old Vertex AI docs URL redirects to it.
+    - The Gemini API's `gemini-embedding-2`: *"The system silently truncates inputs that exceed this
+      limit"* (8,192 tokens across all modalities) [[GEMINI-EMB]](#src-gemini-emb).
 
-> **Input modalities: text only, and structure is just more text.**
-> - **None of the nine models above is multimodal.** Each takes text in and nothing else. Tables,
->   figures and scans reach them only as the text the parser made (→ [M3](../03-parsing-and-chunking/README.md);
+> **Input modalities: text only (one exception), and structure is just more text.**
+> - **Ten of the eleven models above take text in and nothing else.** Tables, figures and scans
+>   reach them only as the text the parser made (→ [M3](../03-parsing-and-chunking/README.md);
 >   images: see the multimodal notes under [What an embedding model is optimizing](#what-an-embedding-model-is-optimizing)
 >   and [Dimensionality](#dimensionality-matryoshka-truncation-and-the-storage-bill)).
->   Models that do take images or video: [image-and-video-embeddings.md](image-and-video-embeddings.md#image-text-embedders).
+> - **The exception is `gemini-embedding-2`.** Its documented input is *"Text, image, video, audio,
+>   PDF"*, mapped *"into a unified embedding space"* [[GEMINI-EMB]](#src-gemini-emb).
+>   - For a PDF it reads the page itself: it *"renders each page as an image"* (258 tokens per page),
+>     and runs OCR (optical character recognition) on scanned pages [[GEMINI-EMB]](#src-gemini-emb).
+>   - So for this model a scan need not pass through M3's parser first.
+>   - Per request it takes at most 6 images, 1 PDF of up to 6 pages, or 120 s of video
+>     [[GEMINI-EMB]](#src-gemini-emb). More limits, and the other models that take images or
+>     video: [image-and-video-embeddings.md](image-and-video-embeddings.md#image-text-embedders).
+>   - `gemini-embedding-001` stays text only: input *"Text"* [[GEMINI-EMB]](#src-gemini-emb).
 > - **Markdown, JSON and code get no special handling either.** There is no markdown, JSON or code
 >   mode: `{"lane": "RTM–SIN", "dg_surcharge": 3.5}` is tokenized like any sentence, and the model
 >   embeds the resulting string. Structure helps only as far as training taught the model what the
->   syntax means. Three consequences:
+>   syntax means. Three consequences, then one near-exception:
 >   - **Syntax costs tokens.** Braces, quotes, repeated keys and table pipes all count against the
 >     input limit, so a JSON record or a markdown table row reaches truncation sooner than the same
 >     facts written as prose.
@@ -135,6 +157,10 @@ vector per text.
 >     problem of the [threshold section](#worked-setting-a-similarity-threshold-from-two-distributions).
 >   - **Code quality depends on the training data, not the architecture.** Check a model's card for
 >     code in its training mix before trusting it on code, or use a code-specific embedder.
+>   - **The nearest thing to a code mode is a query role, not a parser.** `gemini-embedding-001`
+>     has a `CODE_RETRIEVAL_QUERY` task type: *"Use `CODE_RETRIEVAL_QUERY` for queries;
+>     `RETRIEVAL_DOCUMENT` for code blocks to be retrieved"* [[GEMINI-EMB]](#src-gemini-emb). The
+>     code itself is still embedded as text.
 > - **What to do:** recover structure at parse time (`MarkdownNodeParser`, `JSONNodeParser`), then
 >   embed rows or records serialized as `key: value` text with the headers repeated
 >   (→ [M3](../03-parsing-and-chunking/README.md)).
@@ -151,6 +177,9 @@ vector per text.
   - **BERT-style encoders** (BGE, E5, MiniLM, nomic): every token attends to **every** token [[BERT18]](#src-bert18).
   - **LLM-based embedders** (e5-mistral, Qwen3-Embedding): a decoder with **causal** attention, where
     each token attends only to the tokens **before** it [[VAS17]](#src-vas17).
+  - **Not every LLM-based embedder is causal.** Gemini Embedding (Google) is *"a transformer with
+    bidirectional attention initialized from Gemini"*, then mean-pooled [[GEM25]](#src-gem25).
+    Its training recipe: [embedding-history.md](embedding-history.md#gemini-embedding-mar-2025).
 - **How we got here** (static GloVe vectors → BERT → LLM backbones): [embedding-history.md](embedding-history.md).
 - **Why a BERT encoder alone isn't an embedder, and what Sentence-BERT changed**, explained without math:
   [sentence-bert-explained-simply.md](sentence-bert-explained-simply.md).
@@ -160,7 +189,7 @@ This is the step embedding APIs hide, and it's what makes "one string → one ve
 
 | Pooling | What it does | Who uses it |
 |---|---|---|
-| <a id="pool-mean"></a>**Mean** | Averages all the token vectors | Sentence-BERT (UKP Lab, TU Darmstadt), whose default is mean ("The default configuration is MEAN") [[SB19]](#src-sb19); `all-MiniLM-L6-v2` (Sentence Transformers project, on Microsoft's MiniLM), `e5-base-v2` (Microsoft), `nomic-embed-text-v1` (Nomic AI) [[HF-POOL]](#src-hf-pool); jina-embeddings-v2 (Jina AI), whose card says "apply mean pooling" [[HF-POOL]](#src-hf-pool) |
+| <a id="pool-mean"></a>**Mean** | Averages all the token vectors | Sentence-BERT (UKP Lab, TU Darmstadt), whose default is mean ("The default configuration is MEAN") [[SB19]](#src-sb19); `all-MiniLM-L6-v2` (Sentence Transformers project, on Microsoft's MiniLM), `e5-base-v2` (Microsoft), `nomic-embed-text-v1` (Nomic AI) [[HF-POOL]](#src-hf-pool); jina-embeddings-v2 (Jina AI), whose card says "apply mean pooling" [[HF-POOL]](#src-hf-pool); Gemini Embedding (Google): "we have chosen mean pooling, and simply average the token embeddings along the sequence axis", then a linear projection to the output size [[GEM25]](#src-gem25) |
 | <a id="pool-cls"></a>**`[CLS]`** | Keeps the vector of the special first token. BERT (Google): "The first token of every sequence is always a special classification token ([CLS])" [[BERT18]](#src-bert18) | `bge-base-en-v1.5` (BAAI, the Beijing Academy of Artificial Intelligence) [[HF-POOL]](#src-hf-pool) |
 | <a id="pool-last-token"></a>**Last token** | Keeps the vector of the final token | e5-mistral (Microsoft, on Mistral AI's Mistral-7B): "we append an [EOS] token … by taking the last layer [EOS] vector" [[E5M24]](#src-e5m24); `Qwen3-Embedding-0.6B` (Alibaba's Qwen team) [[HF-POOL]](#src-hf-pool) |
 | **Max** | Takes each dimension's maximum over the tokens | Tested by Sentence-BERT (UKP Lab) and found much worse under its regression objective (STSb: MEAN 87.44, CLS 86.62, MAX 69.92) [[SB19]](#src-sb19) |
@@ -170,13 +199,19 @@ This is the step embedding APIs hide, and it's what makes "one string → one ve
   source.*
 - **The pooling is fixed by the model, not chosen by you.** It's part of how the model was trained,
   and in Sentence Transformers it's stored in the model's `1_Pooling/config.json` [[HF-POOL]](#src-hf-pool).
-- **Hosted models don't disclose it.** OpenAI's embeddings guide gives the input limit, but not the
+- **Hosted models mostly don't disclose it.** OpenAI's embeddings guide gives the input limit, but not the
   architecture or the pooling of `text-embedding-3` [[OAI-EMB]](#src-oai-emb).
+  - **Google's `gemini-embedding-001` is the exception.** Google Cloud's model table links its
+    "Tech Report" [[VERTEX-EMB]](#src-vertex-emb), and that report gives mean pooling [[GEM25]](#src-gem25).
+  - **`gemini-embedding-2`'s pooling is not documented** [[GEMINI-EMB]](#src-gemini-emb).
 - **Pooling doesn't change D.** Every token vector already has D numbers (the transformer's hidden
   size), and averaging or picking one of them keeps D. That's why `word_embedding_dimension` in each
   `1_Pooling/config.json` equals the model's output size [[HF-POOL]](#src-hf-pool).
-  - D only shrinks if you shorten the vector afterwards (OpenAI's `dimensions` parameter, or
-    Matryoshka truncation, see [Dimensionality](#dimensionality-matryoshka-truncation-and-the-storage-bill)).
+  - A projection after pooling can change it. Gemini Embedding applies *"a randomly initialized
+    linear projection f … to scale the embedding to the target dimension"* [[GEM25]](#src-gem25).
+    There, D is set by the projection, not by the hidden size.
+  - D only shrinks if you shorten the vector afterwards (OpenAI's `dimensions` parameter, Gemini's
+    `output_dimensionality`, or Matryoshka truncation, see [Dimensionality](#dimensionality-matryoshka-truncation-and-the-storage-bill)).
 - **Normalization** (make the pooled vector a unit vector) usually follows pooling. BGE's model card encodes with
   `normalize_embeddings=True` [[HF-POOL]](#src-hf-pool). Why it matters: the
   [normalization decision](#distance-geometry-and-the-normalization-decision).
@@ -280,7 +315,7 @@ about similarity.
 
 | Metric | Ranking-equivalent to cosine when | What magnitude carries | Typical use |
 |---|---|---|---|
-| Cosine | always | nothing — direction only | Default. LlamaIndex compares embeddings with cosine similarity by default [[LI-EMB]](#src-li-emb). Sentence-BERT compares sentence embeddings with cosine at inference and trains its regression objective on it ("we always use cosine-similarity to compare the similarity between two sentence embeddings") [[SB19]](#src-sb19); see its Figure 2 in [Sentence-BERT, explained simply · §4](sentence-bert-explained-simply.md#4--the-twins-game-teaching-the-reader-to-make-good-maps) |
+| Cosine | always | nothing — direction only | Default. LlamaIndex compares embeddings with cosine similarity by default [[LI-EMB]](#src-li-emb). Sentence-BERT compares sentence embeddings with cosine at inference and trains its regression objective on it ("we always use cosine-similarity to compare the similarity between two sentence embeddings") [[SB19]](#src-sb19); see its Figure 2 in [Sentence-BERT, explained simply · §4](sentence-bert-explained-simply.md#4--the-twins-game-teaching-the-reader-to-make-good-maps). Gemini Embedding's training loss also scores with cosine ("sim(x, y) = x⊤y/∥x∥∥y∥ is cosine similarity") [[GEM25]](#src-gem25) |
 | Dot product | vectors are unit-normalized | the norm of each vector; dot-product-tuned models favour longer passages, cosine-tuned ones shorter [[ST-DOT]](#src-st-dot) | Models trained with a dot-product objective, e.g. DPR [[DPR20]](#src-dpr20), Sentence-Transformers `*-dot-v1`/`*-dot-v5` and `msmarco-distilbert-base-tas-b` [[ST-DOT]](#src-st-dot) |
 | Euclidean (L2) | vectors are unit-normalized | nothing beyond direction, under the identity above | Indexes that are L2 unless told otherwise, e.g. FAISS `IndexFlatL2` (index constructors default to `METRIC_L2`; inner product needs `IndexFlatIP` or `METRIC_INNER_PRODUCT`) [[FAISS]](#src-faiss), which the LlamaIndex `FaissVectorStore` example builds [[LI-FAISS]](#src-li-faiss), and Chroma's default `l2` space [[CHROMA-CFG]](#src-chroma-cfg) |
 
@@ -289,6 +324,11 @@ index or your store**. A vector store's index type is built for one metric; swit
 is a rebuild, not a config toggle. And normalization is a decision you make once, at embed time,
 for every vector in the corpus — which makes it one of the few decisions in the pipeline that is
 retrospectively expensive in exactly the way chunking is ([→ M3 · which decisions are fixed at ingest](../03-parsing-and-chunking/README.md#fixed-at-ingest)).
+
+- **Check whether the provider already normalizes, and at which sizes.** Google: *"the default
+  3072-dimension embeddings are always normalized"*, but `gemini-embedding-001` users *"must manually
+  normalize non-3072 dimensions"*, while `gemini-embedding-2` *"auto-normalizes truncated dimensions"*
+  [[GEMINI-EMB]](#src-gemini-emb).
 
 > **Tradeoff (the ledger entry M4-1).** *Decision:* store L2-normalized embeddings and score with
 > cosine, accepting the collapse of Euclidean/dot/cosine into one ranking. *Costs:* magnitudes are
@@ -647,6 +687,8 @@ Why this is the single most practically dangerous fact in the module:
     needs no re-embedding.
   - **At query time:** apply the same stored transform, q̃ = normalize(q − μ). Never recompute μ from
     queries.
+  - **Measured in the M4 lab:** applied this way, neither transform separated duplicates from
+    one-figure hard negatives ([threshold example, step 4](#worked-setting-a-similarity-threshold-from-two-distributions)).
 
 ### Worked: setting a similarity threshold from two distributions
 
@@ -721,6 +763,11 @@ and the hard negatives it wrongly drops:
 - **Where a gap does exist**, e.g. when hard negatives differ in more than one figure, read the cutoff
   off the hard negatives' upper tail, not the random pairs. Against random pairs, almost any high
   cutoff looks safe.
+- **Centering and whitening don't change this.** The lab applies them the production way (fit on the
+  200 chunks, then frozen for every pair; see [the remedies](#the-cone-effect-raw-embeddings-are-not-isotropic)).
+  No model × transform gives a clean gap on any seed, and the safe cutoff catches at most 2.5% of
+  duplicates. Both transforms re-weight the directions chunks differ in (topic, template, carrier); a
+  one-figure edit barely moves the vector in any of them.
 - **Read it with care:** 200 chunks from 16 clause templates, which pushes random-pair scores up;
   an open stand-in for the unnamed leader; one corpus. Rerun it on your own chunks.
 
@@ -738,9 +785,9 @@ and the hard negatives it wrongly drops:
 Vector width is the single largest multiplier on your storage line item, and unlike chunk count it
 is chosen for you by the model vendor — unless you use Matryoshka Representation Learning(MRL), which
 trains *"coarse-to-fine representations"* so that a single embedding can be truncated to a shorter
-prefix at query time, reporting *"up to 14x smaller embedding size"* for classification at equal
-accuracy and *"up to 14x real-world speed-ups for large-scale retrieval"* on image benchmarks
-[[MRL22]](#src-mrl22). \
+prefix at query time, reporting, on ImageNet, *"up to 14x smaller embedding size"* for classification
+at equal accuracy, and retrieval *"∼14× faster in practice"* at equal accuracy by shortlisting with a
+16-dimension prefix and re-ranking with the full vector [[MRL22]](#src-mrl22). \
 The property that makes this safe is that the truncated vector is still a valid embedding,
 because the training objective explicitly supervised the prefixes: MRL representations are *"at
 least as accurate and rich as independently trained low-dimensional representations"* [[MRL22]](#src-mrl22).
@@ -752,23 +799,35 @@ Like Russian nesting dolls, each shorter prefix (the first 32 numbers, then 64, 
 
 </details>
 
-LlamaIndex exposes this as a pass-through: extra keyword arguments to `HuggingFaceEmbedding` are
+1. LlamaIndex exposes this as a pass-through: extra keyword arguments to `HuggingFaceEmbedding` are
 forwarded to the underlying `SentenceTransformer`, and the docs name `truncate_dim` explicitly
-alongside `backend`, `model_kwargs`, and `revision` [[LI-EMB]](#src-li-emb). Hosted providers expose the same idea
+alongside `backend`, `model_kwargs`, and `revision` [[LI-EMB]](#src-li-emb). 
+2. Hosted providers expose the same idea
 as a parameter — the third-generation OpenAI embedding models support reducing vector size via a
 `dimensions` parameter, and provider testing reports that reducing dimensions below the 1,536 of
 `text-embedding-ada-002` still leaves performance "slightly better" [[MSAOAI]](#src-msaoai).
-OpenAI does not document how `dimensions` works, but outside sources say it is Matryoshka truncation.
-An OpenAI API product manager is quoted confirming *"We did train this based on MRL"*
-[[AIM-MRL24]](#src-aim-mrl24)[[PC-OAI3]](#src-pc-oai3). A community test found that the first 1,024
-values of a 3,072-d `text-embedding-3-large` vector, renormalized to unit length, match the native
-1,024-d output (dot product ≈ 0.9999993) [[OAIF-TRUNC24]](#src-oaif-trunc24). *Second-hand and
-community-measured, not documented by OpenAI.*
+3. OpenAI does not document how `dimensions` works, but outside sources say it is Matryoshka truncation.
+  - An OpenAI API product manager is quoted confirming *"We did train this based on MRL"*
+[[AIM-MRL24]](#src-aim-mrl24)[[PC-OAI3]](#src-pc-oai3). 
+  - A community test found that the first 1,024 values of a 3,072-d `text-embedding-3-large` vector, renormalized to unit length, match the native
+1,024-d output (dot product ≈ 0.9999993) [[OAIF-TRUNC24]](#src-oaif-trunc24). 
+  - *Second-hand and community-measured, not documented by OpenAI.*
+4. Google documents the same mechanism for Gemini as the `output_dimensionality` parameter.
+  - **MRL, stated by the vendor:** *"Both `gemini-embedding-001`
+    and `gemini-embedding-2` are trained using the Matryoshka Representation Learning (MRL)
+    technique"* [[GEMINI-EMB]](#src-gemini-emb).
+  - **Sizes:** *"By default, both models output a 3072-dimensional embedding … We recommend using
+    768, 1536, or 3072 output dimensions"*. The model table allows *"128 - 3072"* [[GEMINI-EMB]](#src-gemini-emb).
+  - **The tech report matches the recommended sizes:** 3,072-d output *"with the MRL support on 768
+    and 1,536 dimensions"* [[GEM25]](#src-gem25).
+  - **Re-normalizing depends on the model.** `gemini-embedding-001`: *"you must manually normalize
+    non-3072 dimensions"*. `gemini-embedding-2` *"auto-normalizes truncated dimensions"* [[GEMINI-EMB]](#src-gemini-emb).
 
-Here is what the width actually costs at LogiTrack's scale. M3's structure-aware path produces
-**40,703 nodes**; the hierarchical configuration that wins clause recall embeds **187,043** leaf
-vectors ([→ M3](../03-parsing-and-chunking/README.md#overlap-what-it-buys-and-what-it-costs)). Raw vector bytes are $4 \times D \times N$ at float32, shown at the
-hierarchical count because that is the case memory planning must cover:
+Here is what the width actually costs at LogiTrack's scale. 
+- M3's `SentenceSplitter(512, 50)` configurations, with or without Markdown parsing first, produce **40,703 nodes**; the hierarchical configuration that wins clause recall embeds **187,043** leaf
+vectors ([→ M3's results table](../03-parsing-and-chunking/README.md#worked-example-two-chunkers-one-corpus-measured)).
+- Raw vector bytes are $4 \times D \times N$: 4 bytes per float32 number, D numbers per vector, N
+  vectors. Shown at the hierarchical count because that is the case memory planning must cover:
 
 | Model | Dimensions | Raw bytes @187,043 vectors | vs. 384-d | @40,703 nodes |
 |---|---|---|---|---|
@@ -777,6 +836,7 @@ hierarchical count because that is the case memory planning must cover:
 | `Qwen/Qwen3-Embedding-0.6B` (verified config: `hidden_size` 1024) [[HF-QWEN3E]](#src-hf-qwen3e) | 1,024 | 0.77 GB | 2.7× | 0.17 GB |
 | `text-embedding-3-small` / `text-embedding-ada-002` [[MSAOAI]](#src-msaoai) | 1,536 | 1.15 GB | 4.0× | 0.25 GB |
 | `text-embedding-3-large` [[MSAOAI]](#src-msaoai) | 3,072 | 2.30 GB | 8.0× | 0.50 GB |
+| `gemini-embedding-001` / `gemini-embedding-2` (default size) [[GEMINI-EMB]](#src-gemini-emb) | 3,072 | 2.30 GB | 8.0× | 0.50 GB |
 
 Three readings of that table, none of which is "pick the small one":
 
@@ -790,7 +850,10 @@ Three readings of that table, none of which is "pick the small one":
    by output volume. The decision is a *triple*, not a size.
 3. **Truncation is a free second chance that most teams never take.** If your model is MRL-trained,
    the honest experiment is to sweep $D \in \{256, 512, 768, \text{full}\}$ against recall on your
-   own query set, because the recall curve is flatter than the storage curve [[MRL22]](#src-mrl22).
+   own query set. Storage grows linearly with D (4 × D × N), while quality flattens: MRL's
+   image-retrieval mAP@10 is nearly flat from 32 to 2,048 dimensions (its Figure 7) [[MRL22]](#src-mrl22),
+   and the M4 Matryoshka lab keeps 98.6% of recall@1 at a third of the dimensions on text
+   ([recipe results](#the-recipe-step-by-step)).
 
 > **Multimodal inputs** ($\color{red}\text{to be discussed}$) — image embeddings are deferred by decision ([syllabus §1](../../syllabus.md#1-scope-knobs-frozen)); notes for when that scope opens.
 > - CLIP learns image representations by matching captions to images ([CLIP](https://arxiv.org/abs/2103.00020)) — contrastive, like the text objectives above.
@@ -818,8 +881,11 @@ add the results:
 
 $$\mathcal{L}_{\text{MRL}} = \sum_{m \in \mathcal{M}} c_m \cdot \mathcal{L}\big(z_{1:m}\big)$$
 
-Here $z_{1:m}$ is the first $m$ numbers of the embedding $z$, $\mathcal{M}$ is the set of widths, and
-$c_m$ is how much each width counts. This is the paper's objective [[MRL22]](#src-mrl22). The paper also
+Here $z_{1:m}$ is the first $m$ numbers of the embedding $z$, and $\mathcal{L}(z_{1:m})$ is the usual loss
+(for retrieval, the contrastive loss in [Step 3 of the recipe below](#the-recipe-step-by-step))
+computed on those truncated vectors. $\mathcal{M}$ is the set of
+widths, and $c_m$ is the weight on width $m$'s loss: how hard training pushes that prefix to be good
+(the paper and the recipe use $c_m = 1$ for all). This is the paper's objective [[MRL22]](#src-mrl22). The paper also
 adds a small classification head per width for its classification experiments; for retrieval you score
 the prefixes directly, as below.
 
@@ -832,7 +898,7 @@ loss is computed several times. Inference is unchanged: embed once at full width
 #### The recipe, step by step
 
 <details>
-<summary><b>Show the recipe</b>: 8 steps of Python, then the recorded result of running it</summary>
+<summary><b>Show the recipe</b>: 8 steps of Python</summary>
 
 You need Python, `torch` and `transformers` (`pip install torch transformers`), and a list of
 `(query, passage)` pairs where each passage answers its query. A few thousand pairs is enough to see
@@ -861,7 +927,7 @@ model = AutoModel.from_pretrained(MODEL)
 ```python
 def embed(texts):
     batch = tok(texts, padding=True, truncation=True, max_length=256, return_tensors="pt")
-    tokens = model(**batch).last_hidden_state             # (B, T, D): one vector per token
+    tokens = model(**batch).last_hidden_state             # (B, T, D): one vector per token per batch
     mask = batch["attention_mask"].unsqueeze(-1).float()  # 1 for real tokens, 0 for padding
     return (tokens * mask).sum(1) / mask.sum(1)           # average the real tokens -> (B, D)
 ```
@@ -871,6 +937,9 @@ every other passage in the batch acts as a wrong answer (an in-batch negative).
 
 ```python
 def contrastive_loss(q, p, temperature=0.05):
+    """q: (B, m) query embeddings; p: (B, m) passage embeddings. Row i of q and row i of p
+    come from the same (query, passage) pair, so both have the batch size B. m is the width:
+    the full D, or a prefix when called from matryoshka_loss."""
     q = F.normalize(q, dim=-1)                 # unit length, so q @ p.T is cosine similarity
     p = F.normalize(p, dim=-1)
     scores = q @ p.T / temperature             # (B, B): every query against every passage
@@ -905,7 +974,9 @@ def train(pairs, dims, epochs=1, batch_size=32, lr=2e-5):
 
 **Step 6 · Use a truncated vector: cut, then re-normalize.** Cutting a unit vector makes it shorter than
 unit length, so normalize again before computing cosine. That's also what OpenAI's `dimensions`
-parameter appears to do (above).
+parameter appears to do (above). Google documents the step outright: with `gemini-embedding-001`
+you normalize a truncated vector yourself, and `gemini-embedding-2` does it for you
+[[GEMINI-EMB]](#src-gemini-emb).
 
 ```python
 @torch.no_grad()
@@ -948,68 +1019,94 @@ for m in DIMS:
 The prediction from the paper: at full width the two models are close, and at 32 or 64 the Matryoshka
 model holds up much better.
 
-**One run of exactly this code**, with [`lab/run_matryoshka_recipe.py`](lab/run_matryoshka_recipe.py), which
-executes the blocks above straight from this README. Steps 1–6 were run as written. The data was 3,500 random pairs from
+</details>
+
+**Runs of exactly this code**, with [`lab/run_matryoshka_recipe.py`](lab/run_matryoshka_recipe.py), which
+executes the blocks above straight from this README. The data was 3,500 random pairs from
 `sentence-transformers/natural-questions`: 3,000 to train for one epoch, 500 held out. Recall@1 on the
-held-out 500:
+held-out 500 (seed 0). Beside each model's prefix, a **PCA-k** row shows the best post-hoc compression
+for comparison: fitted on the 3,000 training passages, then applied frozen as normalize((x − μ) · U<sub>k</sub>).
 
-| Width | Base model, untrained | Matryoshka (`DIMS`) | Control (`dims=[384]`) |
-|---|---|---|---|
-| 32 | 0.800 | **0.892** | 0.808 |
-| 64 | 0.916 | **0.936** | 0.926 |
-| 128 | 0.958 | 0.952 | 0.958 |
-| 256 | 0.964 | 0.966 | 0.970 |
-| 384 (full) | 0.974 | 0.976 | **0.980** |
+| Width | Base, prefix | Base, PCA | Matryoshka, prefix | Control, prefix | Control, PCA |
+|---|---|---|---|---|---|
+| 32 | 0.800 | 0.870 | **0.888** | 0.816 | 0.880 |
+| 64 | 0.916 | **0.950** | 0.934 | 0.930 | 0.946 |
+| 128 | 0.958 | 0.976 | 0.956 | 0.966 | **0.980** |
+| 256 | 0.964 | 0.976 | 0.966 | 0.972 | **0.980** |
+| 384 (full) | 0.974 | 0.976 | 0.970 | 0.980 | **0.982** |
 
-- **The prediction held.** At 32 dimensions the Matryoshka model beats the control by 8 points; at full
-  width the control is ahead by 0.4. Ordinary training didn't make the short prefix better than the
-  untrained base model (0.808 vs 0.800). Matryoshka training did.
-- **Read it with care:** it is one seed, one epoch and 500 test queries, and `all-MiniLM-L6-v2` was
-  already trained on Natural Questions, which is why the untrained base scores so high. Expect bigger gaps
-  on data the base model hasn't seen.
-- *Run on 2026-11-14 with torch 2.15.0 and transformers 5.23.0, on a laptop CPU in about four minutes.
-  The raw output, pinned versions and how to rerun it (other seeds, or a quick synthetic smoke test):
-  [lab/README.md](lab/README.md#recorded-result-2026-11-14-seed-0-the-versions-in-requirementstxt).*
+- **The prediction held against the naive slice.** At 32 dimensions the Matryoshka prefix beats the
+  control's prefix by 7.2 points (0.888 vs 0.816); at full width the control is ahead by 1.0. Ordinary
+  training barely moved the short prefix (0.816 vs the base model's 0.800).
+- **PCA on the untrained model matches it.** Over seeds 0–2, at 32 dimensions the Matryoshka prefix
+  averages 0.880 and base-model PCA 0.884, a tie (one seed's standard error is about 0.015). At 64, base
+  PCA wins on every seed (0.952 vs 0.937 on average). Unlike the MRL paper's image results (its Figure 7),
+  MRL showed no edge here over a fitted projection.
+- **So MRL's practical edge here is that it needs no fit.** The prefix is just `v[:m]`: nothing to store
+  or apply to queries, and it works on vectors you can't refit, such as an API's `dimensions`. PCA needs
+  μ and U<sub>k</sub> fitted on your corpus and applied to every query.
+- **Read it with care:** one epoch and 500 test queries, and `all-MiniLM-L6-v2` was already trained on
+  Natural Questions, so fine-tuning had little to add. Expect MRL to matter more on data the base model
+  hasn't seen.
+- *Run on 2026-11-14 with torch 2.15.0 and transformers 5.23.0, on a laptop CPU in about 4.5 minutes per
+  seed. Raw output, all three seeds and how to rerun:
+  [lab/README.md](lab/README.md#pca-baseline-is-matryoshka-better-than-the-best-post-hoc-compression).
+  An earlier, unseeded run is kept there too; its MRL and control numbers differ from these by at most
+  0.008.*
 - **With a library instead:** Sentence Transformers wraps any loss the same way with `MatryoshkaLoss`.
   Fine-tuning a real model with it is in the
   [M15 side file, step 3](../15-finetuning-retrieval-models/open-embedder-pick-and-finetuning.md#step-3--the-loss).
 
-</details>
 
 ---
 
 ## Symmetric vs asymmetric, and instruction prefixes
 
-Retrieval is asymmetric almost by construction: a query is short, interrogative, and under-specified;
-a document is long, declarative, and self-contained. DPR did not use one encoder for both sides —
-it learned a dual-encoder framework for questions and passages [[DPR20]](#src-dpr20). Two families of solutions
-follow.
+**The problem.** Retrieval isn't "find text that looks like the query"; it's "find text that answers it".
+- Query: `dg surcharge rtm sin?`. Wanted: *"The dangerous goods surcharge on the Rotterdam–Singapore lane
+  is 3.5% of the base rate…"*
+- A plain "find similar text" embedder may instead return other *questions*, e.g. an FAQ line "What's the
+  DG surcharge to Singapore?", because questions resemble questions more than answers.
+- So the model needs to know which side of the pair a text is on, while query and passage vectors still
+  share one space. There are two ways to get both.
 
-**Architectural asymmetry.** Separate query and passage encoders, trained jointly. LlamaIndex
-supports the *shape* of this even when a single model serves both roles: `BaseEmbedding` gives you
-`_get_query_embedding` and `_get_text_embedding` as distinct methods, and the custom-embeddings
-documentation builds `InstructorEmbeddings` on exactly that split, encoding the query with an
-instruction and the document with the same instruction string [[LI-EMB]](#src-li-emb).
+**A · One model, role prefixes.** The same model encodes both sides, so the space is shared by
+construction; a prefix tells it the role.
+- e5 is trained with role markers: inputs start with `"query: "` or `"passage: "`, and for symmetric
+  tasks (comparing two texts of the same kind) both sides use `"query: "` [[HF-E5]](#src-hf-e5). That
+  training took it past BM25 on BEIR zero-shot, *"without using any labeled data"* [[E522]](#src-e522).
+- INSTRUCTOR generalizes the prefix to a task description: *"every text input is embedded together
+  with instructions explaining the use case"*, reporting *"an average improvement of 3.4%"* over 70
+  datasets and that it is *"robust to changes in instructions"* [[INSTR22]](#src-instr22).
+- LlamaIndex exposes the split as two methods on `BaseEmbedding`, `_get_query_embedding` and
+  `_get_text_embedding`, so a prefix can be applied per side [[LI-EMB]](#src-li-emb).
+- **Gemini moves the role out of the text, then back in.**
+  - `gemini-embedding-001` takes it as an API parameter, `task_type`, not as a text prefix: *"Use
+    `RETRIEVAL_QUERY` for queries; `RETRIEVAL_DOCUMENT` for documents to be retrieved."* The other
+    values are `SEMANTIC_SIMILARITY`, `CLASSIFICATION`, `CLUSTERING`, `CODE_RETRIEVAL_QUERY`,
+    `QUESTION_ANSWERING` and `FACT_VERIFICATION` [[GEMINI-EMB]](#src-gemini-emb).
+  - `gemini-embedding-2` drops the parameter: *"You cannot use the `task_type` field for the
+    `gemini-embedding-2` model. Instead, include the task as an instruction in your prompt."* For
+    search, the query is `task: search result | query: {content}` and the document is
+    `title: {title} | text: {content}`, with *"`title: none`"* when there is no title [[GEMINI-EMB]](#src-gemini-emb).
+  - In training, the role enters on the query side only. The tech report prepends a task string t,
+    such as "question answering", to the query, q = f(mean_pool(M(t ⊕ q))), and embeds the passage
+    without one [[GEM25]](#src-gem25).
 
-**Textual asymmetry — prefixes and instructions.** E5 prepends role markers and is trained with
-weakly-supervised contrastive pre-training over curated text pairs, becoming *"the first model that
-outperforms the strong BM25 baseline on the BEIR retrieval benchmark without using any labeled
-data"* in zero-shot settings [[E522]](#src-e522). INSTRUCTOR generalizes the idea: *"every text input is embedded
-together with instructions explaining the use case (e.g., task and domain descriptions)"*, trained
-over 330 annotated tasks, with the authors reporting *"an average improvement of 3.4%"* over the
-previous best across 70 datasets and — importantly — that it is *"robust to changes in instructions"*
-[[INSTR22]](#src-instr22).
+**B · Two encoders, trained together.** DPR uses a separate question encoder and passage encoder
+[[DPR20]](#src-dpr20).
+- This isn't the "different models can't be compared" problem. That applies to models trained
+  separately. DPR's two encoders are trained as a pair on one contrastive loss, which forces their
+  outputs into one shared space, so query · passage is meaningful by construction.
+- Swapping either encoder for one from another run breaks that, exactly like a model swap.
 
-The operational failure this prevents is mundane and common: embedding documents with a query-side
-prefix, or querying without the prefix the model was trained to expect. A prefixed model used
-unprefixed is not broken — it degrades quietly, which is worse. The check is a two-line experiment:
-embed 200 pairs with and without the prefix, and compare recall. If the model's card specifies
-prefixes, treat their presence or absence as part of the model's interface, not as a tuning knob.
-
-A second, sharper caveat sits underneath the prefix research. A 2026 study across 6 embedding models
-and 11 datasets found that instruction-tuned embedding models are evaluated with a single prompt per
-task, and that *"the default prompt can both systematically understate or overstate performance"*
-[[ONEP26]](#src-onep26). Instructions are a real lever *and* a real measurement hazard.
+**The failure mode: the wrong prefix, or none.**
+- Embedding passages with the query prefix, or querying without the prefix the model expects, raises
+  no error. Recall just drops, quietly.
+- The check is two lines: embed 200 labelled pairs with and without the prefix, and compare recall.
+- Treat a documented prefix as part of the model's interface, not a tuning knob.
+- Prompts are also a measurement hazard: a 2026 study of 6 models and 11 datasets found that *"the
+  default prompt can both systematically understate or overstate performance"* [[ONEP26]](#src-onep26).
 
 > **Tradeoff (the ledger entry M4-3).** *Decision:* where a model documents prefixes or
 > instructions, encode them as versioned constants in the ingest path and the query path together.
@@ -1025,16 +1122,41 @@ task, and that *"the default prompt can both systematically understate or overst
 
 Two benchmarks dominate model selection, and they are different instruments.
 
-**BEIR** is a zero-shot, out-of-domain benchmark: 18 datasets, 10 systems spanning lexical, sparse,
-dense, late-interaction, and reranking architectures. Its headline result is uncomfortable reading
-for a dense-retrieval-only pipeline: *"BM25 is a robust baseline"*, while *"dense and sparse-retrieval
-models are computationally more efficient but often underperform other approaches, highlighting the
-considerable room for improvement in their generalization capabilities"* [[BEIR21]](#src-beir21). Read that as the
-first honest signal that embeddings are not universally superior — the lexical comparison itself is
-M7's territory, but the *finding* that a general-purpose dense model degrades out of domain is
-exactly the failure mode of the opening scene.
+**BEIR** (Benchmarking IR, where IR is information retrieval) tests search systems on topics they
+weren't trained on [[BEIR21]](#src-beir21).
+- **What it ran:** 18 datasets (biomedical, finance, fact-checking and more), and 10 search systems
+  from five families: keyword search (BM25, the classic "best matching" keyword-ranking formula),
+  learned keyword weighting, embeddings (one vector per text, the kind this module is about), one
+  vector per token (ColBERT, Contextualized late interaction over BERT), and keyword search followed by
+  a cross-encoder re-ranker.
+- **What it found:** plain keyword search held up well, and embedding models often did worse than the
+  other approaches on unfamiliar topics. In the paper's words, *"BM25 is a robust baseline"*, while
+  *"dense and sparse-retrieval models are computationally more efficient but often underperform other
+  approaches"*.
+- **Results on three biomedical datasets**, scored by [nDCG@10](../13-evaluation/README.md#ndcg-in-plain-words) (normalized Discounted Cumulative Gain:
+  how well the right documents rank within the top 10; higher is better). The first four columns are
+  from BEIR (2021); the E5 columns are from the E5 paper (2022), which reports BM25 identically:
 
-**MTEB** is the broader instrument: 8 embedding tasks, 58 datasets, 112 languages, 33 models
+  | Dataset | BM25 (keywords) | DPR (Dense Passage Retrieval) | TAS-B (Balanced Topic Aware Sampling) | BM25 + re-ranker | E5-PT base (no labelled data) | E5 base (fine-tuned) |
+  |---|---|---|---|---|---|---|
+  | TREC-COVID (Text REtrieval Conference's COVID track) | 0.656 | 0.332 | 0.481 | 0.757 | 0.610 | **0.796** |
+  | NFCorpus (NutritionFacts corpus) | 0.325 | 0.189 | 0.319 | 0.350 | 0.358 | **0.366** |
+  | BioASQ (biomedical question answering) | 0.465 | 0.127 | 0.383 | **0.523** | not reported | not reported |
+
+  DPR, TAS-B and E5 are all embedding models. E5 (EmbEddings from bidirEctional Encoder
+  rEpresentations) [[E522]](#src-e522) trained on far more text pairs. Its pre-trained-only version,
+  E5-PT (PT for "pre-training": contrastive pre-training on unlabelled web text pairs, with no labelled
+  fine-tuning), beat BM25 by 1.2 points on average over 15 BEIR datasets, *"the first reported result
+  that an unsupervised model can beat BM25 on the BEIR benchmark"*.
+- **Why it matters here:** a pipeline that searches *only* with embeddings can lose to decades-old
+  keyword search when your documents are unlike the model's training data. That's the opening scene's
+  failure. Combining keyword and embedding search is M7's topic, and re-ranking is M9's.
+- **Newer embedders close much of the gap, as the E5 columns show.** E5-PT still trails BM25 on
+  TREC-COVID. Fine-tuning puts E5 clearly ahead, and that fine-tuning used general labelled data
+  (MS MARCO, NQ and NLI), not these datasets, so its scores here are still zero-shot
+  [[E522]](#src-e522). The lesson stands: measure on your own queries.
+
+**MTEB** (Massive Text Embedding Benchmark) is the broader instrument: 8 embedding tasks, 58 datasets, 112 languages, 33 models
 benchmarked, with the conclusion that *"no particular text embedding method dominates across all
 tasks"* and that the field *"has yet to converge on a universal text embedding method"* [[MTEB22]](#src-mteb22).
 LlamaIndex's documentation points to the MTEB leaderboard as *"the canonical place to compare
@@ -1043,17 +1165,82 @@ current models across accuracy, speed, and multilingual support"* [[LI-EMB]](#sr
 Canonical is not sufficient. Two verified results bound what the leaderboard can tell you:
 
 - **Rank does not survive contact with a harder task.** BRIGHT — 1,384 real-world
-  reasoning-intensive queries — reports that the leading model on the MTEB leaderboard, which scores
-  *"59.0 nDCG@10"*, produces *"a score of nDCG@10 of 18.3 on BRIGHT"* [[BRIGHT24]](#src-bright24). A leaderboard
+  reasoning-intensive queries — reports that the leading model on the MTEB leaderboard (SFR-Embedding-Mistral,
+  as of 2024-05-28), which scores *"59.0 [nDCG@10](../13-evaluation/README.md#ndcg-in-plain-words)"* on MTEB's retrieval subset (BEIR), produces
+  *"a score of [nDCG@10](../13-evaluation/README.md#ndcg-in-plain-words) of 18.3 on BRIGHT"* [[BRIGHT24]](#src-bright24). Both are × 100: 0.590 and 0.183. A leaderboard
   position is a statement about the leaderboard's query distribution.
 - **Rank is not even stable under prompt choice.** Kostiuk & Enevoldsen show that under adversarial
   prompt selection *"any model can be promoted to first place"* [[ONEP26]](#src-onep26).
 
-There is also a bound that no amount of model quality removes. Weller et al. connect learning-theory
-results to retrieval and show that *"the number of top-k subsets of documents capable of being
-returned as the result of some query is limited by the dimension of the embedding"*, demonstrating
-empirically that *"even state-of-the-art models fail"* on a dataset of deliberately simple queries
-[[LIMIT25]](#src-limit25). A single vector per chunk is a fixed-capacity channel; some query→document-set mappings
+There is also a bound that no amount of model quality removes. Weller et al. show that *"the number
+of top-k subsets of documents capable of being returned as the result of some query is limited by the
+dimension of the embedding"* [[LIMIT25]](#src-limit25).
+
+- **The claim:**
+  - Setup: one vector per document, one per query.
+  - Each query returns a set of documents: its top-k.
+  - How many *different* sets the search can return is capped by the dimension d.
+  - No model, however good, gets past that cap.
+  - *Example:* 46 documents give 1,035 possible pairs. If every pair is the right answer to some
+    query, the d-dimensional space has to fit 1,035 different "top-2" regions. Past some number of
+    documents, it can't.
+- **The test that rules out bad training: let the vectors cheat.** They dropped the given
+  transformer embedding model and gave every document and every query its own freely adjustable
+  vector, then optimized those vectors directly on the correct answers, and tested on those same
+  (query, document) pairs. It's deliberate overfitting, the best any embedder could ever do.
+
+  <details>
+  <summary><b>How the cheat works, step by step</b></summary>
+
+  - **Build the test:** take n documents, list every pair of them (n choose 2 pairs), and create one
+    query per pair whose correct answer is exactly that pair.
+  - *Example:* with 10 documents there are 45 pairs, so 45 queries, and all 45 must return their
+    exact pair. Add an 11th document (55 pairs) and try again. Keep going until 100% is no longer
+    reachable. That size is **critical-n**.
+  - The vectors are unit length and optimized with Adam and the InfoNCE contrastive loss (the same
+    "pick the right one" test as the [Matryoshka recipe's Step 3](#the-recipe-step-by-step), with two
+    right answers per query and every document as a candidate) [[LIMIT25]](#src-limit25).
+  - There's no train/test split, on purpose. The question isn't "can a model learn this?" but "can
+    such vectors exist at all?". In the paper's words, *"This will not generalize to a new dataset,
+    but is done to show the highest performance that could possibly occur"* [[LIMIT25]](#src-limit25).
+
+  </details>
+
+- **Even the cheat hits a wall.** At small d (up to about 45), it arrives at a few hundred documents.
+  Extrapolated, it's about **1.7M documents at 768 dimensions** and **about 107M at 3,072** [[LIMIT25]](#src-limit25).
+  - That's a ceiling. Real models have to build vectors from language, so they hit the wall much sooner.
+- **The LIMIT dataset makes it concrete with trivially easy questions.**
+  - *Documents:* "Jon Durben likes Quokkas and Apples.", "Ovid Rahm likes Quokkas and Rabbits."
+  - *Query:* "Who likes Quokkas?", with exactly 2 correct people per query.
+  - *The same construction, made explicit:*
+    - Pick 46 people. 46 is the smallest number whose pairs exceed 1,000: 45 choose 2 = 990, but
+      46 choose 2 = 1,035.
+    - List all 1,035 pairs of those 46 people.
+    - Each of the 1,000 queries takes one of those pairs as its answer. For example, if Jon and Ovid
+      are a pair, both documents get the same random attribute ("likes Quokkas"), and the query is
+      "Who likes Quokkas?".
+    - So 1,000 of the 1,035 possible pairs must each be some query's exact top-2.
+  - *Size:* the full version hides those 46 among 50,000 documents; the small version has only the 46 [[LIMIT25]](#src-limit25).
+- **Top embedders fail at a task a child could do.**
+  - Tested: E5-Mistral 7B, GritLM 7B, Promptriever, Qwen3 Embed, Snowflake Arctic and Gemini Embed
+    (Google). *"Despite the simplicity of the task we see that SOTA models struggle"* (SOTA: state of
+    the art) [[LIMIT25]](#src-limit25).
+  - Most stay under 20% recall@100. Gemini Embed at its full 3,072 dimensions gets **10.0%** (the
+    paper doesn't say which Gemini model version it called). Even on the 46-document version they
+    can't solve it.
+  - **BM25 gets 93.6%.** Keyword search is effectively one dimension per vocabulary word, so it has
+    room to spare. Multi-vector ColBERT does better than single vectors, but isn't solved either.
+  - Bigger d helps, as the theory predicts. Fine-tuning on a LIMIT training split barely helps, so
+    it isn't missing training data. It's the geometry [[LIMIT25]](#src-limit25).
+- **What it means for a RAG system:** watch for queries whose answers are unusual combinations of
+  documents.
+  - *Example:* "contracts with a demurrage clause **and** no DG exemption", or "suppliers certified
+    for X **in** region Y". These ask for intersections a single vector per document may be unable
+    to represent, however good the model.
+  - *Remedies:* keyword or hybrid search (M7), re-ranking the candidates (M9), multi-vector models,
+    or larger d. Measure on queries of that shape before trusting the embedder.
+
+A single vector per chunk is a fixed-capacity channel; some query→document-set mappings
 simply do not fit in it at any dimension you can afford. M7 is where that limit becomes an
 architecture decision; here it is the reason "pick a better embedding model" is not a universal
 answer.
@@ -1208,8 +1395,8 @@ that no benchmark ranks.
 - **"The MTEB leaderboard rank predicts downstream performance."** LlamaIndex's documentation calls
   the MTEB leaderboard *"the canonical place to compare current models"* [[LI-EMB]](#src-li-emb), and MTEB itself
   states that *"no particular text embedding method dominates across all tasks"* [[MTEB22]](#src-mteb22). Against
-  that, BRIGHT reports the MTEB leaderboard leader scoring *"59.0 nDCG@10"* on MTEB versus *"a score
-  of nDCG@10 of 18.3 on BRIGHT"* [[BRIGHT24]](#src-bright24), and Kostiuk & Enevoldsen find that *"the leaderboard
+  that, BRIGHT reports the MTEB leaderboard leader scoring *"59.0 [nDCG@10](../13-evaluation/README.md#ndcg-in-plain-words)"* on MTEB's retrieval subset (BEIR) versus *"a score
+  of [nDCG@10](../13-evaluation/README.md#ndcg-in-plain-words) of 18.3 on BRIGHT"* [[BRIGHT24]](#src-bright24), and Kostiuk & Enevoldsen find that *"the leaderboard
   ranking is not robust to prompt selection: a developer improve their rank by favorably selecting
   prompts, and under adversarial prompt selection any model can be promoted to first place"*
   [[ONEP26]](#src-onep26). **What to change:** use the leaderboard as a shortlist generator and nothing more. The
@@ -1250,21 +1437,21 @@ that no benchmark ranks.
 - <a id="src-li-emb"></a>[Embeddings](https://developers.llamaindex.ai/python/framework/module_guides/models/embeddings/) — `[LI-EMB]` · owns `Settings.embed_model`, the `OpenAIEmbedding` default fallback warning, `HuggingFaceEmbedding` and its Sentence-Transformers pass-through (`truncate_dim`), the `embed_batch_size` default, the `BaseEmbedding` query/document hook split, and the re-index-on-model-change requirement.
 - <a id="src-li-idx"></a>[Using VectorStoreIndex](https://developers.llamaindex.ai/python/framework/module_guides/indexing/vector_store_index/) — `[LI-IDX]` · owns the default insert batch size and `VectorStoreIndex` construction.
 - <a id="src-dpr20"></a>*Dense Passage Retrieval for Open-Domain Question Answering* — Vladimir Karpukhin, Barlas Oğuz, Sewon Min, Patrick Lewis, Ledell Wu, Sergey Edunov, Danqi Chen, Wen-tau Yih · arXiv:2004.04906 (EMNLP 2020) · [arxiv.org/abs/2004.04906](https://arxiv.org/abs/2004.04906) — `[DPR20]` · owns the dual-encoder dense-retrieval formulation and its top-20 accuracy gains over tuned BM25.
-- <a id="src-beir21"></a>*BEIR: A Heterogenous Benchmark for Zero-shot Evaluation of Information Retrieval Models* — Nandan Thakur, Nils Reimers, Andreas Rücklé, Abhishek Srivastava, Iryna Gurevych · arXiv:2104.08663 (NeurIPS 2021 Datasets and Benchmarks) · [arxiv.org/abs/2104.08663](https://arxiv.org/abs/2104.08663) — `[BEIR21]` · owns the zero-shot heterogeneous benchmark and the out-of-domain generalization gap of dense retrievers.
+- <a id="src-beir21"></a>*BEIR: A Heterogenous Benchmark for Zero-shot Evaluation of Information Retrieval Models* — Nandan Thakur, Nils Reimers, Andreas Rücklé, Abhishek Srivastava, Iryna Gurevych · arXiv:2104.08663 (NeurIPS 2021 Datasets and Benchmarks) · [arxiv.org/abs/2104.08663](https://arxiv.org/abs/2104.08663) — `[BEIR21]` · owns the five system families and ten systems (its Table 2 header), the BEIR acronym (Benchmarking IR), the TREC-COVID, NFCorpus and BioASQ [nDCG@10](../13-evaluation/README.md#ndcg-in-plain-words) rows (Table 2, read from the PDF on 2026-11-14), the zero-shot heterogeneous benchmark and the out-of-domain generalization gap of dense retrievers.
 - <a id="src-sb19"></a>*Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks* — Nils Reimers, Iryna Gurevych · arXiv:1908.10084 (EMNLP 2019) · [arxiv.org/abs/1908.10084](https://arxiv.org/abs/1908.10084) — `[SB19]` · owns the siamese/triplet bi-encoder architecture and its cost motivation.
 - <a id="src-simcse21"></a>*SimCSE: Simple Contrastive Learning of Sentence Embeddings* — Tianyu Gao, Xingcheng Yao, Danqi Chen · arXiv:2104.08821 (EMNLP 2021) · [arxiv.org/abs/2104.08821](https://arxiv.org/abs/2104.08821) — `[SIMCSE21]` · owns dropout-as-augmentation, representation collapse, and the contrastive regularization of anisotropic space.
 - <a id="src-eth19"></a>*How Contextual are Contextualized Word Representations? Comparing the Geometry of BERT, ELMo, and GPT-2 Embeddings* — Kawin Ethayarajh · arXiv:1909.00512 (EMNLP 2019) · [arxiv.org/abs/1909.00512](https://arxiv.org/abs/1909.00512) — `[ETH19]` · owns the anisotropy measurement across model families and layers.
 - <a id="src-gao19"></a>*Representation Degeneration Problem in Training Natural Language Generation Models* — Jun Gao, Di He, Xu Tan, Tao Qin, Liwei Wang, Tie-Yan Liu · arXiv:1907.12009 (ICLR 2019) · [arxiv.org/abs/1907.12009](https://arxiv.org/abs/1907.12009) — `[GAO19]` · owns the narrow-cone degeneration finding and its regularization remedy.
 - <a id="src-mrl22"></a>*Matryoshka Representation Learning* — Aditya Kusupati, Gantavya Bhatt, Aniket Rege, Matthew Wallingford, Aditya Sinha, Vivek Ramanujan, William Howard-Snyder, Kaifeng Chen, Sham Kakade, Prateek Jain, Ali Farhadi · arXiv:2205.13147 (2022) · [arxiv.org/abs/2205.13147](https://arxiv.org/abs/2205.13147) — `[MRL22]` · owns coarse-to-fine embeddings and the truncation/storage/speed tradeoffs.
 - <a id="src-mteb22"></a>*MTEB: Massive Text Embedding Benchmark* — Niklas Muennighoff, Nouamane Tazi, Loïc Magne, Nils Reimers · arXiv:2210.07316 (2022) · [arxiv.org/abs/2210.07316](https://arxiv.org/abs/2210.07316) — `[MTEB22]` · owns the multi-task embedding benchmark and the no-dominant-method result.
-- <a id="src-e522"></a>*Text Embeddings by Weakly-Supervised Contrastive Pre-training* — Liang Wang, Nan Yang, Xiaolong Huang, Binxing Jiao, Linjun Yang, Daxin Jiang, Rangan Majumder, Furu Wei · arXiv:2212.03533 (2022) · [arxiv.org/abs/2212.03533](https://arxiv.org/abs/2212.03533) — `[E522]` · owns E5's prefix convention and its zero-shot BEIR result.
+- <a id="src-e522"></a>*Text Embeddings by Weakly-Supervised Contrastive Pre-training* — Liang Wang, Nan Yang, Xiaolong Huang, Binxing Jiao, Linjun Yang, Daxin Jiang, Rangan Majumder, Furu Wei · arXiv:2212.03533 (2022) · [arxiv.org/abs/2212.03533](https://arxiv.org/abs/2212.03533) — `[E522]` · owns the E5 acronym (EmbEddings from bidirEctional Encoder rEpresentations), the TREC-COVID and NFCorpus [nDCG@10](../13-evaluation/README.md#ndcg-in-plain-words) for E5-PT base (Table 1: 61.0, 35.8) and fine-tuned E5 base (Table 2: 79.6, 36.6), read from the PDF on 2026-11-14; E5's prefix convention and its zero-shot BEIR result.
 - <a id="src-instr22"></a>*One Embedder, Any Task: Instruction-Finetuned Text Embeddings* — Hongjin Su, Weijia Shi, Jungo Kasai, Yizhong Wang, Yushi Hu, Mari Ostendorf, Wen-tau Yih, Noah A. Smith, Luke Zettlemoyer, Tao Yu · arXiv:2212.09741 (ACL 2023 Findings) · [arxiv.org/abs/2212.09741](https://arxiv.org/abs/2212.09741) — `[INSTR22]` · owns instruction-conditioned embeddings and the 3.4% multi-task improvement.
 - <a id="src-vec2text23"></a>*Text Embeddings Reveal (Almost) As Much As Text* — John X. Morris, Volodymyr Kuleshov, Vitaly Shmatikov, Alexander M. Rush · arXiv:2310.06816 (EMNLP 2023) · [arxiv.org/abs/2310.06816](https://arxiv.org/abs/2310.06816) — `[VEC2TEXT23]` · owns embedding inversion and the 92% exact-recovery result.
-- <a id="src-bright24"></a>*BRIGHT: A Realistic and Challenging Benchmark for Reasoning-Intensive Retrieval* — Hongjin Su, Howard Yen, Mengzhou Xia, Weijia Shi, Niklas Muennighoff, Han-yu Wang, Haisu Liu, Quan Shi, Zachary S. Siegel, Michael Tang, Ruoxi Sun, Jinsung Yoon, Sercan O. Arik, Danqi Chen, Tao Yu · arXiv:2407.12883 (2024) · [arxiv.org/abs/2407.12883](https://arxiv.org/abs/2407.12883) — `[BRIGHT24]` · owns the leaderboard-leader collapse on reasoning-intensive retrieval (59.0 → 18.3 nDCG@10).
-- <a id="src-limit25"></a>*On the Theoretical Limitations of Embedding-Based Retrieval* — Orion Weller, Michael Boratko, Iftekhar Naim, Jinhyuk Lee · arXiv:2508.21038 (ICLR 2026) · [arxiv.org/abs/2508.21038](https://arxiv.org/abs/2508.21038) — `[LIMIT25]` · owns the dimension-bounded expressivity limit of single-vector retrieval.
+- <a id="src-bright24"></a>*BRIGHT: A Realistic and Challenging Benchmark for Reasoning-Intensive Retrieval* — Hongjin Su, Howard Yen, Mengzhou Xia, Weijia Shi, Niklas Muennighoff, Han-yu Wang, Haisu Liu, Quan Shi, Zachary S. Siegel, Michael Tang, Ruoxi Sun, Jinsung Yoon, Sercan O. Arik, Danqi Chen, Tao Yu · arXiv:2407.12883 (ICLR 2025) · [arxiv.org/abs/2407.12883](https://arxiv.org/abs/2407.12883) — `[BRIGHT24]` · owns the 1,384 queries, and the leaderboard-leader collapse on reasoning-intensive retrieval: SFR-Embedding-Mistral, the MTEB leader as of 2024-05-28, from 59.0 on MTEB's retrieval subset (BEIR) to 18.3 [nDCG@10](../13-evaluation/README.md#ndcg-in-plain-words)).
+- <a id="src-limit25"></a>*On the Theoretical Limitations of Embedding-Based Retrieval* — Orion Weller, Michael Boratko, Iftekhar Naim, Jinhyuk Lee · arXiv:2508.21038 (ICLR 2026) · [arxiv.org/abs/2508.21038](https://arxiv.org/abs/2508.21038) — `[LIMIT25]` · owns the dimension-bounded expressivity limit of single-vector retrieval; the free-embedding experiment (unit vectors, Adam, InfoNCE, optimized and tested on the same qrels, critical-n, the cubic fit and its extrapolations: ~500k at 512, 1.7M at 768, 4M at 1,024, 107M at 3,072, 250M at 4,096); the LIMIT dataset (50k documents, 1,000 queries, 2 relevant each, a 46-document small version); the tested models and Figure 3 caption; Table 5 scores (Gemini Embed 10.0 and BM25 93.6 recall@100); and the finding that training on LIMIT's train split barely helps (Figure 5). Read from the PDF on 2026-11-14.
 - <a id="src-onep26"></a>*One prompt is not enough: Instruction Sensitivity Undermines Embedding Model Evaluation* — Yevhen Kostiuk, Kenneth Enevoldsen · arXiv:2605.22544 (2026) · [arxiv.org/abs/2605.22544](https://arxiv.org/abs/2605.22544) — `[ONEP26]` · owns the instruction-sensitivity result and the non-robustness of leaderboard ranking to prompt selection.
 - <a id="src-msaoai"></a>[Azure OpenAI models — embeddings](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/concepts/models) — `[MSAOAI]` · owns the embedding model dimension/token-limit table, the `dimensions` parameter, and the "you need to generate new embeddings" migration statement.
-- <a id="src-hf-e5"></a>[intfloat/e5-base-v2 model card](https://huggingface.co/intfloat/e5-base-v2) — `[HF-E5]` · owns the `"query: "` prefix for symmetric similarity and the FAQ's *"cosine similarity scores distribute around 0.7 to 1.0"* from *"a low temperature 0.01 for InfoNCE contrastive loss"*, as read by the M4 lab on 2026-11-14.
+- <a id="src-hf-e5"></a>[intfloat/e5-base-v2 model card](https://huggingface.co/intfloat/e5-base-v2) — `[HF-E5]` · owns the `"query: "` / `"passage: "` prefixes for retrieval and `"query: "` on both sides for symmetric similarity and the FAQ's *"cosine similarity scores distribute around 0.7 to 1.0"* from *"a low temperature 0.01 for InfoNCE contrastive loss"*, as read by the M4 lab on 2026-11-14.
 - <a id="src-hf-bge15"></a>[BAAI/bge-base-en-v1.5 model card](https://huggingface.co/BAAI/bge-base-en-v1.5) — `[HF-BGE15]` · owns *"no instruction"* for passages, `[CLS]` pooling, and v1.5's release *"to alleviate the issue of the similarity distribution"*, as read by the M4 lab on 2026-11-14.
 - <a id="src-hf-bges"></a>[BAAI/bge-small-en-v1.5 `config.json`](https://huggingface.co/BAAI/bge-small-en-v1.5/raw/main/config.json) — `[HF-BGES]` · owns `hidden_size` 384 and `max_position_embeddings` 512 for the model named in the LlamaIndex docs.
 - <a id="src-hf-denseon"></a>[lightonai/DenseOn `config.json`](https://huggingface.co/lightonai/DenseOn/raw/main/config.json) — `[HF-DENSEON]` · owns `hidden_size` 768 and `max_position_embeddings` 8192.
@@ -1285,6 +1472,10 @@ that no benchmark ranks.
 - <a id="src-faiss"></a>Faiss wiki: [Faiss indexes](https://github.com/facebookresearch/faiss/wiki/Faiss-indexes) and [MetricType and distances](https://github.com/facebookresearch/faiss/wiki/MetricType-and-distances), plus [`faiss/Index.h`](https://github.com/facebookresearch/faiss/blob/main/faiss/Index.h) — Meta (facebookresearch), read 2026-11-14 — `[FAISS]` · library documentation and source · owns `IndexFlatL2` as "Exact Search for L2" (brute-force) and `IndexFlatIP` as "Exact Search for Inner Product … also for cosine (normalize vectors beforehand)", inner product as "not by itself cosine similarity, unless the vectors are normalized", and the base constructor default `Index(idx_t d_in = 0, MetricType metric = METRIC_L2)` (`IndexHNSWFlat` and the `IndexIVF*` constructors also default to `METRIC_L2`).
 - <a id="src-li-faiss"></a>[Faiss Vector Store](https://developers.llamaindex.ai/python/examples/vector_stores/faissindexdemo/) — LlamaIndex docs, read 2026-11-14 — `[LI-FAISS]` · library example · owns `faiss_index = faiss.IndexFlatL2(d)` with `d = 1536`.
 - <a id="src-chroma-cfg"></a>[Configure Collections](https://docs.trychroma.com/docs/collections/configure) — Chroma docs, read 2026-11-14 — `[CHROMA-CFG]` · library documentation · owns "The default is `l2` (squared L2 norm), and other possible values are `cosine` (cosine similarity), and `ip` (inner product)", set through `configuration={"hnsw": {"space": ...}}` on single-node Chroma (the page says SPANN settings on Distributed and Chroma Cloud are ignored).
+- <a id="src-gemini-emb"></a>[Embeddings (Gemini API)](https://aistudio.google.com/docs/embeddings) (redirected from ai.google.dev/gemini-api/docs/embeddings) — Google, read 2026-11-14 — `[GEMINI-EMB]` · official doc · owns both models' table rows (`gemini-embedding-001`: input "Text", "Input token limit 2,048", "Latest update June 2025"; `gemini-embedding-2`: input "Text, image, video, audio, PDF", "Input token limit 8,192", "Latest update April 2026"; both "Flexible, supports: 128 - 3072, Recommended: 768, 1536, 3072"); the MRL statement and `output_dimensionality`; the normalization rules ("the default 3072-dimension embeddings are always normalized", "you must manually normalize non-3072 dimensions" for `-001`, "auto-normalizes truncated dimensions" for `-2`); the `task_type` values for `-001` and the `task: … | query:` / `title: … | text:` prompt formats for `-2`; PDF handling (258 tokens per page image, OCR on scans, "silently truncates inputs that exceed this limit"); and the migration note that the two embedding spaces are "incompatible". It does not document either model's architecture or pooling.
+- <a id="src-gemini-depr"></a>[Gemini deprecations · Embedding models](https://aistudio.google.com/docs/deprecations) (redirected from ai.google.dev/gemini-api/docs/deprecations) — Google, read 2026-11-14 — `[GEMINI-DEPR]` · official doc · owns the release and shutdown dates: `gemini-embedding-2` released April 22, 2026, "No shutdown date announced"; `gemini-embedding-001` released July 14, 2025, shutdown May 14, 2028, recommended replacement `gemini-embedding-2`.
+- <a id="src-vertex-emb"></a>[Text embeddings API](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/models/text-embeddings-api) (redirected from cloud.google.com/vertex-ai/generative-ai/docs/model-reference/text-embeddings-api) — Google Cloud, Gemini Enterprise Agent Platform docs, page "Last updated 2026-11-12", read 2026-11-14 — `[VERTEX-EMB]` · official doc · owns `autoTruncate` ("When set to true, input text will be truncated. When set to false, an error is returned … Defaults to true"), the model table (`gemini-embedding-001`: "up to 3072", "2048 tokens"), and the `gemini-embedding-001` row's "Tech Report" link, which goes to the [DeepMind publication page](https://deepmind.google/research/publications/157741/) for arXiv:2503.07891 ([GEM25]).
+- <a id="src-gem25"></a>*Gemini Embedding: Generalizable Embeddings from Gemini* — Jinhyuk Lee, Feiyang Chen, Sahil Dua, Daniel Cer, Madhuri Shanbhogue et al., Google · arXiv:2503.07891 (2025-03-10) · [arxiv.org/abs/2503.07891](https://arxiv.org/abs/2503.07891) — Google, read from the PDF 2026-11-14 — `[GEM25]` · technical report · owns "a transformer with bidirectional attention initialized from Gemini", mean pooling ("we have chosen mean pooling, and simply average the token embeddings along the sequence axis"), the linear projection to the output dimension, the cosine similarity in its training loss, the task string prepended to the query only, and "𝑑 = 3,072 dimensional embeddings, with the MRL support on 768 and 1,536 dimensions". It names no API model id.
 
 **Unsupported (synthetic, or not verified in this module):** in the Gao et al. collapsibles, the 7-step example's vectors are invented for illustration; the parameter saving from tying (30,522 × 768) is computed from the `bert-base-uncased` configuration; that word2vec and GloVe keep separate input and context vectors is general background, not from [GAO19]; the gradient (p<sub>v</sub> − 𝟙[v = y]) · h is standard softmax algebra. the derivation in the cone section's "Why a high average cosine means a cone" collapsible (the mean vector as the axis, ‖m‖ ≈ √c̄, the angle table) is this course's own math, not a claim in [ETH19]; its "clearly positive on raw BERT" line follows ETH19's Figure 1 and wasn't run here. the LogiTrack corpus, its 3,000-document
 and 13.5M-word figures, the 60-query evaluation set, the 187,043- and 40,703-vector counts (which are
@@ -1312,6 +1503,12 @@ opening scene's one-in-four slip and dropped revised clauses, come from
 `lab/run_threshold_distributions.py` (2026-11-14, seeds 0–2) on 200 templated clause chunks, with
 `text-embedding-ada-002` and `text-embedding-3-large` called through OpenAI's API and
 `bge-base-en-v1.5` standing in for the unnamed leader, which was not measured.
+**Gemini:** that the tech report [[GEM25]](#src-gem25) describes `gemini-embedding-001` rests on
+Google Cloud's model table linking it as that model's "Tech Report" [[VERTEX-EMB]](#src-vertex-emb);
+the report itself names no API model id. Nothing here is claimed for `gemini-embedding-2`'s
+architecture or pooling, which Google doesn't document. Which Gemini model LIMIT's "Gemini Embed"
+was is not stated in the paper. The Gemini storage row is the in-file $4 \times D \times N$
+arithmetic at Google's default 3,072, not a measurement. No Gemini model was run in the M4 lab.
 
 **Verification note:** 🟡 *pending* — Step 7 (memory-less logic review) and Step 8 (literature
 survey) not yet run on this module.

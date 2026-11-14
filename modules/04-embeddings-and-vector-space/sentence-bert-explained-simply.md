@@ -99,7 +99,12 @@ says "cross-encoder"; it calls this "bidirectional cross attention between two s
 
 - People first tried asking BERT to place the stickers. It did a bad job.
   - **Grown-up:** the first attempts used pretrained BERT as it was, taking either the `[CLS]` vector or
-    the mean of the token vectors as the sentence embedding, then comparing with cosine.
+    the mean of the token vectors as the sentence embedding, then comparing with cosine. This was the
+    common practice. In the paper's words, *"The most commonly used approach is to average the BERT
+    output layer … or by using the output of the first token (the [CLS] token)"*, and the popular
+    bert-as-service tool offered both. Nobody had checked it: *"there is so far no evaluation if these
+    methods lead to useful sentence embeddings"* [[SB19]](#src-sb19). The pipeline is the same one
+    Sentence-BERT uses later (embed, pool, compare). Only the training behind the vectors differs.
 - That's because BERT had only ever practised a different game: **guessing hidden words** in a sentence,
   like a fill-in-the-blank puzzle. It got really good at words, but nobody ever taught it to put whole
   sentences on a map.
@@ -109,9 +114,23 @@ says "cross-encoder"; it calls this "bidirectional cross attention between two s
 - So its map was messy: sentences about totally different things ended up close together. It was even
   worse than a very old, simple trick of just averaging the words' own stickers.
   - **Grown-up:** raw BERT vectors sit in a narrow cone, so most pairs score high
-    ([M4 · The cone effect](README.md#the-cone-effect-raw-embeddings-are-not-isotropic)). On
-    sentence-similarity benchmarks, averaged GloVe word vectors score 61.32, BERT mean pooling 54.81 and
-    BERT's `[CLS]` vector 29.19 [[SB19]](#src-sb19).
+    ([M4 · The cone effect](README.md#the-cone-effect-raw-embeddings-are-not-isotropic)). The paper
+    measured the common practice for the first time. Its verdict: *"this common practice yields
+    rather bad sentence embeddings, often worse than averaging GloVe embeddings"* [[SB19]](#src-sb19).
+    Spearman correlation × 100 with human similarity scores (higher is better), no task-specific
+    training:
+
+    | Sentence vector | Average over 7 STS tasks | STS benchmark alone |
+    |---|---|---|
+    | BERT `[CLS]` vector | 29.19 | 16.50 |
+    | BERT, average of token vectors | 54.81 | 46.35 |
+    | Average of GloVe word vectors (2014) | 61.32 | 58.02 |
+    | InferSent (2017, siamese LSTM trained on NLI) | 65.01 | 68.03 |
+    | Universal Sentence Encoder (2018) | 71.22 | 74.92 |
+
+    The two encoders actually trained to produce sentence vectors, InferSent and USE, beat raw BERT
+    easily, even though BERT was the stronger model. The vectors were the problem, not the pipeline
+    [[SB19]](#src-sb19) (Table 1).
 
 ### 4 · The twins game: teaching the reader to make good maps
 
@@ -241,7 +260,10 @@ boxes are the twins: one network with tied weights, drawn twice.*
     </details>
 - After practising on about a million pairs, the brain makes good maps, even for sentences it has never
   seen.
-  - **Grown-up:** the model generalizes beyond its training pairs, but unevenly. In the paper's own
+  - **Grown-up:** on the same measures as §3's table, the NLI-trained model scores **74.89** (base) and
+    **76.55** (large) averaged over the 7 STS tasks, and **77.03** and **79.23** on the STS benchmark,
+    against 54.81 and 46.35 for raw BERT mean pooling [[SB19]](#src-sb19) (Table 1). Same pipeline,
+    re-shaped space. It generalizes beyond its training pairs, but unevenly: in the paper's own
     cross-topic test, performance dropped by about 7 points [[SB19]](#src-sb19). Domain shift is the
     reason M4 says to measure on your own queries.
 - **How a sentence gets one sticker:** the brain makes a little sticker for **every word**, then mixes
@@ -261,15 +283,24 @@ boxes are the twins: one network with tied weights, drawn twice.*
 - Finding the most alike pair among 10,000 sentences went from about **65 hours** with the judge to
   about **5 seconds** with the map.
   - **Grown-up:** those are the paper's figures [[SB19]](#src-sb19). The price is accuracy: a
-    bi-encoder never lets the two texts attend to each other. That's why pipelines often use a
-    bi-encoder to fetch candidates and then re-score the top few with a cross-encoder
-    ([→ M9](../09-ranking-fusion-reranking/README.md)).
+    bi-encoder never lets the two texts attend to each other. The cross-encoder wasn't abandoned for
+    being bad. It's still the more accurate of the two, just too slow to search with. The paper's own
+    comparison, STS benchmark test set, both trained on NLI and then on the STS benchmark:
+
+    | Model size | BERT cross-encoder | Sentence-BERT bi-encoder |
+    |---|---|---|
+    | base | **88.33** | 85.35 |
+    | large | **88.77** | 86.10 |
+
+    That's why pipelines often use both: a bi-encoder to fetch candidates from stored vectors, then a
+    cross-encoder to re-score the top few ([→ M9](../09-ranking-fusion-reranking/README.md))
+    [[SB19]](#src-sb19) (Table 2).
 
 ## For grown-ups: what each part of the story really is
 
 | In the story | What it really is |
 |---|---|
-| The judge looking at two drawings at once | A **cross-encoder**: BERT reads both sentences in one input. It's accurate, but you must run it again for every pair. |
+| The judge looking at two drawings at once | A **cross-encoder**: BERT reads both sentences in one input. Still the more accurate approach (88.77 vs 86.10 on the STS benchmark, §5), but you must run it again for every pair. |
 | A sticker with a spot on the map | A **sentence embedding**: one vector of D numbers per sentence (768 for BERT-base). |
 | Close spots mean similar meaning | **Cosine similarity** between the two vectors ([M4 · Distance](README.md#distance-geometry-and-the-normalization-decision)). |
 | The fill-in-the-blank game | BERT's **pretraining**: masked-language modelling and next-sentence prediction. Neither asks for comparable sentence vectors. |
@@ -295,12 +326,11 @@ Where Sentence-BERT sits in the bigger story, and what came after it:
 ## Sources
 
 - <a id="src-bert18"></a>*BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding* — Jacob Devlin, Ming-Wei Chang, Kenton Lee, Kristina Toutanova · arXiv:1810.04805 (NAACL 2019) · [arxiv.org/abs/1810.04805](https://arxiv.org/abs/1810.04805) · local copy: [papers/bert-1810.04805.pdf](papers/bert-1810.04805.pdf) — `[BERT18]` · owns the §1 animation's grounding: `[CLS]` and `[SEP]`, segment embeddings, the token + segment + position sum (Fig. 2), C as the `[CLS]` final hidden vector fed to a classification layer (§3, §4.1, Fig. 4a), bidirectional self-attention, and BERT-base's 12 layers / 768 dims / 12 heads / 110M parameters. Tokens come from Hugging Face's `bert-base-uncased` vocabulary, not the paper.
-- <a id="src-sb19"></a>*Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks* — Nils Reimers, Iryna Gurevych · arXiv:1908.10084 (EMNLP 2019) · [arxiv.org/abs/1908.10084](https://arxiv.org/abs/1908.10084) · local copy: [papers/sentence-bert-1908.10084.pdf](papers/sentence-bert-1908.10084.pdf) — `[SB19]` · owns the architecture figure in §4 (Figures 1 and 2, page 3, rendered from the PDF), the ~50 million BERT runs and the 65-hours-to-5-seconds comparison, the ~7-point cross-topic drop, the STS averages for GloVe, BERT mean pooling and `[CLS]`, the siamese architecture, mean pooling as default, and the NLI, regression and triplet objectives.
+- <a id="src-sb19"></a>*Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks* — Nils Reimers, Iryna Gurevych · arXiv:1908.10084 (EMNLP 2019) · [arxiv.org/abs/1908.10084](https://arxiv.org/abs/1908.10084) · local copy: [papers/sentence-bert-1908.10084.pdf](papers/sentence-bert-1908.10084.pdf) — `[SB19]` · owns the architecture figure in §4 (Figures 1 and 2, page 3, rendered from the PDF), the ~50 million BERT runs and the 65-hours-to-5-seconds comparison, the ~7-point cross-topic drop, the common-practice quotes and bert-as-service (§3), Table 1's scores for `[CLS]`, BERT mean pooling, GloVe, InferSent, USE and SBERT-NLI (§3, §4), Table 2's cross-encoder vs bi-encoder scores (§5), the siamese architecture, mean pooling as default, and the NLI, regression and triplet objectives.
 - <a id="src-snli15"></a>*A large annotated corpus for learning natural language inference* — Samuel R. Bowman, Gabor Angeli, Christopher Potts, Christopher D. Manning · arXiv:1508.05326 (EMNLP 2015) · [arxiv.org/abs/1508.05326](https://arxiv.org/abs/1508.05326) · local copy: [papers/snli-1508.05326.pdf](papers/snli-1508.05326.pdf) — `[SNLI15]` · owns SNLI's 570K pairs, Flickr30k captions as premises, the ~2,500 crowdworkers, and the three example pairs (its Table 1).
 - <a id="src-mnli18"></a>*A Broad-Coverage Challenge Corpus for Sentence Understanding through Inference* — Adina Williams, Nikita Nangia, Samuel R. Bowman · arXiv:1704.05426 (NAACL 2018) · [arxiv.org/abs/1704.05426](https://arxiv.org/abs/1704.05426) · local copy: [papers/multinli-1704.05426.pdf](papers/multinli-1704.05426.pdf) — `[MNLI18]` · owns MultiNLI's 433k pairs, the ten genres, five genres in training, and matched vs mismatched evaluation.
 - <a id="src-simcse21"></a>*SimCSE: Simple Contrastive Learning of Sentence Embeddings* — Tianyu Gao, Xingcheng Yao, Danqi Chen · arXiv:2104.08821 (EMNLP 2021) · [arxiv.org/abs/2104.08821](https://arxiv.org/abs/2104.08821) — `[SIMCSE21]` · owns entailment pairs as positives and contradiction pairs as hard negatives.
 
 **Unsupported or simplified:** the weight counts in the "What Sentence-BERT did" table are computed from the Hugging Face `bert-base-uncased` configuration (30,522-entry vocabulary, 512 positions, feed-forward size 3,072), not quoted from a paper. in the `[SEP]` collapsible (§1), "never masked" comes from Google's released pretraining script (`create_pretraining_data.py`), not the paper, and wasn't re-checked for this file; why next-sentence and masked-word training push `[SEP]` toward a boundary meaning is this file's explanation, not a claim in the paper. the "A man is sleeping" / "A man is running" pair in §4 is illustrative, not from a dataset. The drawings, map, judge and twins are analogies written for this file, not
-the paper's. The STS averages are as extracted from the paper in this course's
-[embedding-history](embedding-history.md) research pass; the other figures match M4's existing
-citation of [SB19].
+the paper's. The Table 1 and Table 2 scores were checked against the local PDF; the other figures match M4's
+existing citation of [SB19].
