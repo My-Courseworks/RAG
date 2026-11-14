@@ -1,0 +1,5 @@
+# M4 lab: the Matryoshka recipe. These are the exact versions it was run with on 2026-11-14
+# (Python 3.13.3, macOS, CPU only). Newer versions should work; if one breaks, note it.
+torch==2.15.0
+transformers==5.23.0
+datasets==5.2.0
